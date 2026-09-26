@@ -30,7 +30,7 @@ _Avoid_: base, minimal stack
 _ES_: Núcleo
 
 **Profile**:
-An optional group of services an Operator can turn on for their Instance on top of the Core (e.g. `vo`, `proxy`, `remote`, `transcode`).
+An optional group of services an Operator can turn on for their Instance on top of the Core (e.g. `backup`, `vo`, `proxy`, `remote`, `transcode`).
 _Avoid_: addon, module, plugin
 _ES_: Perfil
 

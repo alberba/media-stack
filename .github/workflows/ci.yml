@@ -25,10 +25,10 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Lint scripts
-        run: shellcheck scripts/*.sh tests/*.sh .githooks/pre-commit
+        run: shellcheck scripts/*.sh tests/*.sh stacks/*/*.sh .githooks/pre-commit
       - name: Validate the Core with docker compose config
         run: |
-          sed -E '/^COMPOSE_PROFILES=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > .env
+          sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > .env
           docker compose config --quiet
       - name: Template tests
         run: tests/template.test.sh
@@ -38,3 +38,9 @@ jobs:
         run: tests/verify.test.sh
       - name: pre-commit hook tests
         run: tests/hooks.test.sh
+      - name: Install sqlite3 for the backup tests
+        run: command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
+      - name: backup Profile script tests
+        run: tests/backup.test.sh
+      - name: backup Profile image, backup and restore round trip
+        run: tests/backup-image.test.sh

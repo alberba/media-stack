@@ -19,7 +19,14 @@ Every Instance runs these services:
 | Jellyfin | Media server | 8096 | no |
 | Seerr | Request portal | 5055 | no |
 
-Optional Profiles on top of the Core are turned on with `COMPOSE_PROFILES` in `.env`.
+## Profiles
+
+Optional groups of services on top of the Core, turned on with `COMPOSE_PROFILES` in
+`.env` (comma separated).
+
+| Profile | What it adds |
+| --- | --- |
+| `backup` | Nightly encrypted copy of the App data to Google Drive, with restore. See [docs/backup.md](docs/backup.md) ([español](docs/backup.es.md)). |
 
 ## Quickstart
 
@@ -45,6 +52,7 @@ compose.yaml            includes every stack
 stacks/<stack>/         one compose file per stack
 scripts/init.sh         host checks + folders + network
 scripts/verify.sh       post-start health and VPN check
+docs/                   guides (backup and restore)
 .env.example            every setting, commented
 ```
 
@@ -56,6 +64,7 @@ Nothing specific to an Instance may be committed (see `docs/adr/0001`). The
 ```sh
 git config core.hooksPath .githooks   # gitleaks pre-commit hook (gitleaks or Docker)
 tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
+tests/backup.test.sh && tests/backup-image.test.sh   # needs sqlite3 and Docker
 ```
 
 Image versions are pinned; [Renovate](https://github.com/apps/renovate) opens PRs to bump

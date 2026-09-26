@@ -43,6 +43,9 @@ load_env() {
 
 env_get() { local name="ENV_$1"; printf '%s' "${!name:-}"; }
 
+# True when Profile $1 is listed in COMPOSE_PROFILES.
+profile_on() { [[ ",$(env_get COMPOSE_PROFILES | tr -d '[:space:]')," == *",$1,"* ]]; }
+
 # True when version $1 >= version $2 (both "X.Y.Z", optional leading "v").
 version_ge() {
   local IFS=.
@@ -94,6 +97,11 @@ check_vars() {
     "") ;;
     *) add_error "VPN_TYPE must be 'wireguard' or 'openvpn', got '$(env_get VPN_TYPE)'." ;;
   esac
+  if profile_on backup; then
+    [ -n "$(env_get RESTIC_PASSWORD)" ] || add_error "RESTIC_PASSWORD is empty (needed by the backup Profile)."
+    local source; source="$(env_get BACKUP_SOURCE)"
+    [ -z "$source" ] || [ -d "$source" ] || add_error "BACKUP_SOURCE $source does not exist: the backup would be empty."
+  fi
 }
 
 # Creates a folder a service writes to and gives it to its owner. Parent folders
@@ -110,6 +118,8 @@ prepare_folders() {
   root="$(env_get APPDATA_ROOT)"
   for dir in "${APPDATA_DIRS[@]}"; do make_owned_dir "$root/$dir" "$owner"; done
   make_owned_dir "$root/seerr" "$SEERR_OWNER"
+  # The backup container runs as root to read every service's files.
+  if profile_on backup; then make_owned_dir "$root/backup" "0:0"; fi
 
   root="$(env_get DATA_ROOT)"
   for dir in "${DATA_DIRS[@]}"; do make_owned_dir "$root/$dir" "$owner"; done

@@ -1,0 +1,38 @@
+# Profile "backup": a nightly, encrypted, off-site copy of the App data (restic to
+# Google Drive through rclone). Databases are copied with SQLite's online backup, so
+# the services keep running. Setup and restore: docs/backup.md.
+services:
+  backup:
+    build: .
+    image: media-stack-backup:local
+    container_name: backup
+    profiles: [backup]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      RESTIC_REPOSITORY: ${RESTIC_REPOSITORY:-rclone:gdrive:media-stack}
+      # Not ":?": Compose would then demand it from Instances without this Profile.
+      # scripts/init.sh and the backup itself fail loudly when it is empty.
+      RESTIC_PASSWORD: ${RESTIC_PASSWORD:-}
+      RESTIC_CACHE_DIR: /config/cache
+      RCLONE_CONFIG: /config/rclone.conf
+      BACKUP_HOST: ${BACKUP_HOST:-media-stack}
+      BACKUP_SCHEDULE: ${BACKUP_SCHEDULE:-0 4 * * *}
+      BACKUP_EXCLUDE: ${BACKUP_EXCLUDE:-}
+      BACKUP_KEEP_DAILY: ${BACKUP_KEEP_DAILY:-7}
+      BACKUP_KEEP_WEEKLY: ${BACKUP_KEEP_WEEKLY:-4}
+      BACKUP_KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-6}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      # Read-write: SQLite needs its lock files to copy a database that is in use.
+      # Nothing else is written there.
+      - ${BACKUP_SOURCE:-${APPDATA_ROOT:?set APPDATA_ROOT in .env}}:/source
+      # rclone.conf, restic's cache and the result of the last run.
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/backup:/config
+    healthcheck:
+      # Unhealthy after a failed run, until the next one succeeds.
+      test: ["CMD-SHELL", "test ! -f /config/last-status || grep -q '^ok' /config/last-status"]
+      interval: 5m
+      timeout: 5s
+      retries: 1

@@ -11,5 +11,6 @@ secretGroup = 1
 [[rules]]
 id = "env-secret-value"
 description = "Password, token or API key assigned in an env-style file"
-regex = '''(?m)^\s*[A-Z0-9_]*(?:PASSWORD|TOKEN|API_KEY|APIKEY|SECRET|AUTH_KEY)[A-Z0-9_]*\s*=\s*["']?([^\s"'#]{8,})'''
+# [ \t], not \s: an empty value must not run on into the next line.
+regex = '''(?m)^[ \t]*[A-Z0-9_]*(?:PASSWORD|TOKEN|API_KEY|APIKEY|SECRET|AUTH_KEY)[A-Z0-9_]*[ \t]*=[ \t]*["']?([^\s"'#]{8,})'''
 secretGroup = 1

@@ -7,3 +7,4 @@ include:
   - stacks/arr/compose.yaml
   - stacks/jellyfin/compose.yaml
   - stacks/seerr/compose.yaml
+  - stacks/backup/compose.yaml

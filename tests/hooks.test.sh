@@ -48,4 +48,11 @@ test_allows_a_clean_commit() {
   assert_status 0
 }
 
+test_an_empty_secret_does_not_swallow_the_next_line() {
+  printf 'TELEGRAM_BOT_TOKEN=\nTELEGRAM_CHAT_ID=\nRESTIC_PASSWORD=\nBACKUP_SOURCE=\n' > "$SANDBOX/.env.example"
+  git -C "$SANDBOX" add .env.example
+  commit
+  assert_status 0
+}
+
 run_tests

@@ -12,8 +12,9 @@ BEHIND_VPN="bazarr flaresolverr prowlarr qbittorrent radarr sonarr"
 
 setup() {
   SANDBOX="$(mktemp -d)"
-  # .env.example with every empty value filled, as an Operator would.
-  sed -E '/^COMPOSE_PROFILES=/!s/^([A-Z_]+)=$/\1=dummy/' "$REPO/.env.example" > "$SANDBOX/.env"
+  # .env.example with every empty value filled, as an Operator would (BACKUP_SOURCE
+  # stays empty: it falls back to APPDATA_ROOT).
+  sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=dummy/' "$REPO/.env.example" > "$SANDBOX/.env"
 }
 teardown() { rm -rf "$SANDBOX"; }
 
@@ -35,7 +36,24 @@ test_every_image_is_pinned() {
   while read -r image; do
     [[ "$image" == *:* ]] || fail "$image has no tag"
     [[ "$image" != *:latest ]] || fail "$image uses :latest"
-  done < <(compose config --images)
+  done < <(compose --profile '*' config --images)
+}
+
+test_backup_profile_is_valid_and_adds_only_the_backup_service() {
+  local services
+  OUTPUT="$(compose --profile backup config -q 2>&1)"; STATUS=$?
+  assert_status 0
+  services="$(compose --profile backup config --services | sort | xargs)"
+  [ "$services" = "backup $CORE_SERVICES" ] || fail "expected 'backup $CORE_SERVICES', got '$services'"
+}
+
+test_backup_profile_backs_up_the_app_data_by_default() {
+  local source
+  source="$(compose --profile backup config --format json | python3 -c '
+import json, sys
+volumes = json.load(sys.stdin)["services"]["backup"]["volumes"]
+print(next(v["source"] for v in volumes if v["target"] == "/source"))')"
+  [ "$source" = "/opt/media-stack/appdata" ] || fail "backup source is '$source', expected APPDATA_ROOT"
 }
 
 test_core_services_are_language_neutral() {
@@ -87,6 +105,7 @@ test_gitignore_blocks_instance_files() {
 test_gitignore_allows_template_files() {
   local path
   for path in compose.yaml stacks/arr/compose.yaml .env.example scripts/init.sh docs/install.md \
+      stacks/backup/Dockerfile stacks/backup/media-backup.sh docs/backup.es.md \
       tests/lib.sh .github/workflows/ci.yml .githooks/pre-commit README.md LICENSE renovate.json \
       .gitleaks.toml .gitignore; do
     gitignored "$path" && fail "$path is ignored"

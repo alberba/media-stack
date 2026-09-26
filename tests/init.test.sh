@@ -49,6 +49,8 @@ VPN_TYPE=wireguard
 WIREGUARD_PRIVATE_KEY='abc='
 OPENVPN_USER=
 OPENVPN_PASSWORD=
+RESTIC_PASSWORD=
+BACKUP_SOURCE=
 EOF
 }
 
@@ -185,6 +187,37 @@ test_does_not_recreate_existing_network() {
   FAKE_NETWORK_EXISTS=1 run_init
   assert_status 0
   assert_file_not_contains "$FAKE_DOCKER_LOG" "network create"
+}
+
+test_backup_profile_requires_a_restic_password() {
+  set_var COMPOSE_PROFILES "vo,backup"
+  run_init
+  assert_status 1
+  assert_output_contains "RESTIC_PASSWORD"
+}
+
+test_restic_password_is_not_required_without_the_backup_profile() {
+  run_init
+  assert_status 0
+  [ ! -e "$SANDBOX/appdata/backup" ] || fail "backup folder created without the backup Profile"
+}
+
+test_backup_profile_creates_its_folder_owned_by_root() {
+  set_var COMPOSE_PROFILES backup
+  set_var RESTIC_PASSWORD "'long secret'"
+  run_init
+  assert_status 0
+  assert_dir "$SANDBOX/appdata/backup"
+  assert_owner "$SANDBOX/appdata/backup" "0:0"
+}
+
+test_backup_source_must_exist_when_set() {
+  set_var COMPOSE_PROFILES backup
+  set_var RESTIC_PASSWORD secret
+  set_var BACKUP_SOURCE "$SANDBOX/nowhere"
+  run_init
+  assert_status 1
+  assert_output_contains "BACKUP_SOURCE"
 }
 
 test_is_idempotent() {
