@@ -1,0 +1,26 @@
+# Whitelist: ignore everything, then allow only what belongs to the Template.
+# Anything specific to an Instance (.env, app data, databases, logs) stays out (ADR 0001).
+*
+!*/
+
+!/.gitignore
+!/.gitleaks.toml
+!/.env.example
+!/compose.yaml
+!/LICENSE
+!/README*.md
+!/CONTEXT.md
+!/AGENTS.md
+!/renovate.json
+
+!/stacks/*/compose.yaml
+!/stacks/*/README.md
+!/scripts/*.sh
+!/tests/*.sh
+!/docs/**/*.md
+!/examples/**/*.example
+!/examples/**/*.md
+!/.githooks/*
+!/.github/**/*.yml
+!/.github/**/*.yaml
+!/.github/**/*.md

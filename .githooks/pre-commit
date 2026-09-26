@@ -1,0 +1,19 @@
+#!/usr/bin/env bash
+# Blocks commits that contain secrets. Enable once per clone with:
+#   git config core.hooksPath .githooks
+# Uses a local gitleaks if installed, otherwise the gitleaks Docker image.
+set -euo pipefail
+
+GITLEAKS_IMAGE="zricethezav/gitleaks:v8.30.1"
+root="$(git rev-parse --show-toplevel)"
+
+if command -v gitleaks >/dev/null 2>&1; then
+  exec gitleaks git --pre-commit --staged --redact --no-banner "$root"
+fi
+if command -v docker >/dev/null 2>&1; then
+  exec docker run --rm -v "$root:/repo" -w /repo \
+    -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
+    "$GITLEAKS_IMAGE" git --pre-commit --staged --redact --no-banner /repo
+fi
+echo "pre-commit: install gitleaks or Docker to scan for secrets (https://github.com/gitleaks/gitleaks)." >&2
+exit 1

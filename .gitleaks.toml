@@ -1,0 +1,15 @@
+# gitleaks config: the default rules, plus the secrets this stack handles.
+[extend]
+useDefault = true
+
+[[rules]]
+id = "wireguard-private-key"
+description = "WireGuard private key"
+regex = '''(?i)(?:WIREGUARD_PRIVATE_KEY|PrivateKey)\s*[=:]\s*["']?([A-Za-z0-9+/]{42}[AEIMQUYcgkosw480]=)'''
+secretGroup = 1
+
+[[rules]]
+id = "env-secret-value"
+description = "Password, token or API key assigned in an env-style file"
+regex = '''(?m)^\s*[A-Z0-9_]*(?:PASSWORD|TOKEN|API_KEY|APIKEY|SECRET|AUTH_KEY)[A-Z0-9_]*\s*=\s*["']?([^\s"'#]{8,})'''
+secretGroup = 1

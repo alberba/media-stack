@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  gitleaks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - name: Scan the full history for secrets
+        run: >-
+          docker run --rm -v "$PWD:/repo"
+          -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*'
+          zricethezav/gitleaks:v8.30.1 git /repo --redact --no-banner --verbose
+
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - name: Lint scripts
+        run: shellcheck scripts/*.sh tests/*.sh .githooks/pre-commit
+      - name: Validate the Core with docker compose config
+        run: |
+          sed -E '/^COMPOSE_PROFILES=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > .env
+          docker compose config --quiet
+      - name: Template tests
+        run: tests/template.test.sh
+      - name: init.sh tests
+        run: sudo tests/init.test.sh
+      - name: verify.sh tests
+        run: tests/verify.test.sh
+      - name: pre-commit hook tests
+        run: tests/hooks.test.sh

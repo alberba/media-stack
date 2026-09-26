@@ -1,0 +1,43 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended"
+  ],
+  "dependencyDashboard": true,
+  "packageRules": [
+    {
+      "description": "linuxserver.io tags: <app version>-ls<build>, e.g. 6.3.0.10514-ls315 or 5.2.3_v2.0.14-ls475",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "lscr.io/linuxserver/**"
+      ],
+      "versioning": "regex:^v?(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)(?:\\.(?<build>\\d+))?(?:_v[\\d.]+)?-ls(?<revision>\\d+)$"
+    },
+    {
+      "description": "Jellyfin tags: <major>.<minor>.<date>-<time>, e.g. 12.1.20260915-010956",
+      "matchDatasources": [
+        "docker"
+      ],
+      "matchPackageNames": [
+        "jellyfin/jellyfin"
+      ],
+      "versioning": "regex:^(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d{8})-(?<build>\\d+)$"
+    }
+  ],
+  "customManagers": [
+    {
+      "description": "gitleaks image pinned in the pre-commit hook and CI",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^\\.githooks/pre-commit$/",
+        "/^\\.github/workflows/.+\\.ya?ml$/"
+      ],
+      "matchStrings": [
+        "(?<depName>zricethezav/gitleaks):(?<currentValue>v[\\d.]+)"
+      ],
+      "datasourceTemplate": "docker"
+    }
+  ]
+}

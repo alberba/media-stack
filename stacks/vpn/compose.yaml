@@ -1,0 +1,116 @@
+# VPN gateway and everything that talks to trackers and indexers.
+# Services with `network_mode: service:gluetun` share gluetun's network, so all their
+# traffic leaves through the VPN, and their web UIs are published by gluetun.
+services:
+  gluetun:
+    image: qmcgaw/gluetun:v3.41.3
+    container_name: gluetun
+    restart: unless-stopped
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:?set VPN_SERVICE_PROVIDER in .env}
+      VPN_TYPE: ${VPN_TYPE:?set VPN_TYPE in .env}
+      WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:-}
+      WIREGUARD_ADDRESSES: ${WIREGUARD_ADDRESSES:-}
+      OPENVPN_USER: ${OPENVPN_USER:-}
+      OPENVPN_PASSWORD: ${OPENVPN_PASSWORD:-}
+      SERVER_COUNTRIES: ${VPN_SERVER_COUNTRIES:-}
+      FIREWALL_OUTBOUND_SUBNETS: ${VPN_OUTBOUND_SUBNETS:-}
+      VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-off}
+      VPN_PORT_FORWARDING_PROVIDER: ${VPN_PORT_FORWARDING_PROVIDER:-}
+      # With port forwarding on, hand the forwarded port to qBittorrent (needs
+      # "Bypass authentication for clients on localhost" enabled in qBittorrent).
+      VPN_PORT_FORWARDING_UP_COMMAND: >-
+        /bin/sh -c 'wget -q -O/dev/null --retry-connrefused --post-data
+        "json={\"listen_port\":{{PORT}},\"current_network_interface\":\"{{VPN_INTERFACE}}\",\"random_port\":false,\"upnp\":false}"
+        http://127.0.0.1:8080/api/v2/app/setPreferences'
+      VPN_PORT_FORWARDING_DOWN_COMMAND: >-
+        /bin/sh -c 'wget -q -O/dev/null --retry-connrefused --post-data
+        "json={\"listen_port\":0,\"current_network_interface\":\"lo\"}"
+        http://127.0.0.1:8080/api/v2/app/setPreferences'
+    ports:
+      - 8080:8080 # qBittorrent
+      - 9696:9696 # Prowlarr
+      - 7878:7878 # Radarr
+      - 8989:8989 # Sonarr
+      - 6767:6767 # Bazarr
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/gluetun:/gluetun
+    networks:
+      media:
+        # Other containers reach the apps behind the VPN by their own names.
+        aliases: [qbittorrent, prowlarr, flaresolverr, radarr, sonarr, bazarr]
+
+  qbittorrent:
+    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
+    container_name: qbittorrent
+    restart: unless-stopped
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:?set PUID in .env}
+      PGID: ${PGID:?set PGID in .env}
+      TZ: ${TZ:?set TZ in .env}
+      WEBUI_PORT: "8080"
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/qbittorrent:/config
+      # Set qBittorrent's default save path to /data/torrents (not /downloads) so
+      # Radarr/Sonarr can hardlink from it.
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/torrents:/data/torrents
+    healthcheck:
+      # Any HTTP answer counts: the API itself needs a login.
+      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:8080 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  prowlarr:
+    image: lscr.io/linuxserver/prowlarr:2.5.2.5491-ls159
+    container_name: prowlarr
+    restart: unless-stopped
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:?set PUID in .env}
+      PGID: ${PGID:?set PGID in .env}
+      TZ: ${TZ:?set TZ in .env}
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/prowlarr:/config
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fso /dev/null http://localhost:9696/ping || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+  flaresolverr:
+    image: ghcr.io/flaresolverr/flaresolverr:v3.5.2
+    container_name: flaresolverr
+    restart: unless-stopped
+    # Behind the VPN too; Prowlarr reaches it at http://localhost:8191.
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8191/health', timeout=5)"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

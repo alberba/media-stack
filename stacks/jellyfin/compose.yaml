@@ -1,0 +1,22 @@
+# Media server. Hardware transcoding is added by a Profile override, not here.
+services:
+  jellyfin:
+    image: jellyfin/jellyfin:12.1.20260915-010956
+    container_name: jellyfin
+    restart: unless-stopped
+    user: ${PUID:?set PUID in .env}:${PGID:?set PGID in .env}
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+    ports:
+      - 8096:8096
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/config:/config
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/cache:/cache
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/media:/data/media
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true
