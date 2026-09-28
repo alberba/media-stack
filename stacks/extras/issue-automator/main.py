@@ -82,7 +82,7 @@ def load_config(environ):
 
     token, chat_id = get("TELEGRAM_BOT_TOKEN"), get("TELEGRAM_CHAT_ID")
     return {
-        "port": int(get("ISSUE_AUTOMATOR_PORT") or 5056),
+        "port": 5056,
         "services": services,
         "vo_server_ids": vo_server_ids,
         "telegram": {"bot_token": token, "chat_id": chat_id} if token and chat_id else None,

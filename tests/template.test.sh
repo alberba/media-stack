@@ -38,6 +38,11 @@ setup() {
 teardown() { rm -rf "$SANDBOX"; }
 
 compose() { docker compose --project-directory "$REPO" --env-file "$SANDBOX/.env" "$@"; }
+# The Worker's own project, with worker/.env.example filled in the same way.
+worker_compose() {
+  sed -E 's/^([A-Z_]+)=$/\1=dummy/' "$REPO/worker/.env.example" > "$SANDBOX/worker.env"
+  docker compose --project-directory "$REPO/worker" --env-file "$SANDBOX/worker.env" "$@"
+}
 
 # Prints a Python expression evaluated over the model (`s` = the services dict) of
 # `compose --profile '*' <extra args> config`.
@@ -68,7 +73,8 @@ test_every_image_is_pinned() {
   while read -r image; do
     [[ "$image" == *:* ]] || fail "$image has no tag"
     [[ "$image" != *:latest ]] || fail "$image uses :latest"
-  done < <(compose --profile '*' config --images; docker compose --project-directory "$REPO/worker" --env-file "$REPO/worker/.env.example" config --images 2>/dev/null)
+  done < <(compose --profile '*' config --images; worker_compose config --images)
+  worker_compose config --images | grep -q tdarr_node || fail "the Worker's image was not checked"
 }
 
 test_backup_profile_is_valid_and_adds_only_the_backup_service() {
@@ -171,6 +177,8 @@ test_instance_specific_values_come_from_the_env() {
   [ "$(query 's["tailscale"]["environment"]["TS_ROUTES"]' <<< "$json")" = dummy ] || fail "Tailscale routes do not come from .env"
   [ "$(query 's["mousehole"]["environment"]["MOUSEHOLE_ALLOWED_HOSTS"]' <<< "$json")" = dummy ] || fail "mousehole allowed host does not come from .env"
   [ "$(query 's["homarr"]["environment"]["SECRET_ENCRYPTION_KEY"]' <<< "$json")" = dummy ] || fail "homarr key does not come from .env"
+  [ "$(query 's["wud"]["environment"]["WUD_AUTH_ADMIN_PASSWORD"]' <<< "$json")" = dummy ] || fail "WUD login does not come from .env"
+  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN"]' <<< "$json")" = dummy ] || fail "WUD alerts do not use TELEGRAM_BOT_TOKEN"
 }
 
 test_tailscale_state_is_kept_in_the_app_data() {
@@ -180,10 +188,9 @@ test_tailscale_state_is_kept_in_the_app_data() {
 
 test_worker_compose_is_valid_and_matches_the_server_version() {
   local server node
-  sed -E 's/^([A-Z_]+)=$/\1=dummy/' "$REPO/worker/.env.example" > "$SANDBOX/worker.env"
-  OUTPUT="$(docker compose --project-directory "$REPO/worker" --env-file "$SANDBOX/worker.env" config -q 2>&1)"; STATUS=$?
+  OUTPUT="$(worker_compose config -q 2>&1)"; STATUS=$?
   assert_status 0
-  node="$(docker compose --project-directory "$REPO/worker" --env-file "$SANDBOX/worker.env" config --images)"
+  node="$(worker_compose config --images)"
   server="$(compose --profile transcode config --images | grep tdarr)"
   [ "${node##*:}" = "${server##*:}" ] || fail "Worker node $node and server $server versions differ"
 }

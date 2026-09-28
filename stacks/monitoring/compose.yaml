@@ -42,6 +42,15 @@ services:
     restart: unless-stopped
     environment:
       TZ: ${TZ:?set TZ in .env}
+      # It can see every container: keep its UI behind a login (scripts/init.sh
+      # requires the password when the Profile is on).
+      WUD_AUTH_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
+      WUD_AUTH_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
+      WUD_WATCHER_LOCAL_CRON: ${WUD_CRON:-0 5 * * *}
+      # Telegram message when an update is found. With these empty, WUD only logs
+      # that the trigger is off.
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_CHATID: ${TELEGRAM_CHAT_ID:-}
     ports:
       - 3000:3000
     volumes:

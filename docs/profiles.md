@@ -94,9 +94,11 @@ these UIs off the internet (see [proxy](#proxy)).
   2. **Add system**: any name, and `/beszel_socket/beszel.sock` as host. Copy the public
      key and the token it shows into `BESZEL_AGENT_KEY` and `BESZEL_AGENT_TOKEN`.
   3. `docker compose up -d beszel-agent`. The agent keeps restarting until then.
-- **What's Up Docker** (`http://<host>:3000`): lists containers with a newer image. The
-  Template's own images are bumped by Renovate; this one shows what your Instance
-  actually runs.
+- **What's Up Docker** (`http://<host>:3000`): lists containers with a newer image, and
+  sends a Telegram message when it finds one (with `TELEGRAM_BOT_TOKEN` and
+  `TELEGRAM_CHAT_ID`). Log in with `WUD_ADMIN_USER` and `WUD_ADMIN_PASSWORD`; it checks at
+  `WUD_CRON`. The Template's own images are bumped by Renovate; this one shows what your
+  Instance actually runs.
 
 ## proxy
 
@@ -129,7 +131,7 @@ Tailscale lets you reach the Instance from your own devices without opening port
 The node's state (its identity and login) lives in `APPDATA_ROOT/tailscale`, so it
 survives restarts and reinstalls, and a restored backup brings back the same node.
 
-**Moving an existing node here** (keeps its name, IP and approved routes):
+**Moving an existing node here** (keeps its name and tailnet IP):
 
 ```sh
 docker stop <old-tailscale-container>      # the same node must never run twice
@@ -138,7 +140,9 @@ sudo cp -a <old-state-folder>/. "$APPDATA_ROOT/tailscale/"   # holds tailscaled.
 ```
 
 Keep the old `TAILSCALE_HOSTNAME`. With the state in place, `scripts/init.sh` does not
-ask for an auth key.
+ask for an auth key. If `TAILSCALE_ROUTES` differs from what the old node advertised
+(check that it is the subnet your LAN really uses), approve the new route in the admin
+console and remove the old one.
 
 ## extras
 

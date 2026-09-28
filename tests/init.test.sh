@@ -55,6 +55,7 @@ RENDER_GID=
 HOMARR_SECRET_KEY=
 TAILSCALE_AUTHKEY=
 MOUSEHOLE_AUTH_PASSWORD=
+WUD_ADMIN_PASSWORD=
 EOF
 }
 
@@ -246,6 +247,7 @@ enable_profiles() {
   set_var HOMARR_SECRET_KEY "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   set_var TAILSCALE_AUTHKEY "tskey-auth-test"
   set_var MOUSEHOLE_AUTH_PASSWORD "long-password"
+  set_var WUD_ADMIN_PASSWORD "another-password"
 }
 
 test_every_profile_creates_its_folders_with_the_right_owner() {
@@ -324,6 +326,14 @@ test_extras_profile_requires_a_mousehole_password() {
   run_init
   assert_status 1
   assert_output_contains "MOUSEHOLE_AUTH_PASSWORD"
+}
+
+test_monitoring_profile_requires_a_wud_password() {
+  enable_profiles monitoring
+  set_var WUD_ADMIN_PASSWORD ""
+  run_init
+  assert_status 1
+  assert_output_contains "WUD_ADMIN_PASSWORD"
 }
 
 test_gpu_override_requires_the_render_group() {

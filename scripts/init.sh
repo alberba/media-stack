@@ -134,6 +134,9 @@ check_vars() {
         || add_error "TAILSCALE_ROUTES: '$route' is not a subnet like 192.168.1.0/24."
     done
   fi
+  if profile_on monitoring; then
+    [ -n "$(env_get WUD_ADMIN_PASSWORD)" ] || add_error "WUD_ADMIN_PASSWORD is empty (needed by the monitoring Profile)."
+  fi
   if profile_on extras; then
     [ -n "$(env_get MOUSEHOLE_AUTH_PASSWORD)" ] || add_error "MOUSEHOLE_AUTH_PASSWORD is empty (needed by the extras Profile)."
   fi
