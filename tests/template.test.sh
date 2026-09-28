@@ -150,7 +150,8 @@ test_gpu_override_gives_jellyfin_and_tdarr_the_render_device() {
   local json service
   json="$(all_profiles_json -f "$REPO/compose.yaml" -f "$REPO/compose.gpu.yaml")"
   for service in jellyfin tdarr; do
-    query '"/dev/dri:/dev/dri" in json.dumps(s[args[0]].get("devices", []))' "$service" <<< "$json" | grep -q true \
+    query 'any(d == "/dev/dri:/dev/dri" or (isinstance(d, dict) and d.get("source") == "/dev/dri")
+      for d in s[args[0]].get("devices", []))' "$service" <<< "$json" | grep -q true \
       || fail "$service has no /dev/dri"
     [ "$(query 's[args[0]].get("group_add")' "$service" <<< "$json")" = '["dummy"]' ] || fail "$service is not in the render group"
   done
