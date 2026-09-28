@@ -48,11 +48,15 @@ account.
 
 ```sh
 git clone https://github.com/alberba/media-stack.git && cd media-stack
-cp .env.example .env      # fill it in: paths, PUID/PGID, TZ, VPN provider
-sudo scripts/init.sh      # checks the host and .env, creates folders and the network
+scripts/setup.sh          # asks questions, writes .env, offers to run init.sh
 docker compose up -d
 scripts/verify.sh         # every service healthy, qBittorrent egress IP is the VPN's
 ```
+
+`scripts/setup.sh` can be run again at any time: it offers the current `.env` values as
+defaults and keeps every setting it does not ask about. To skip it, copy `.env.example`
+to `.env`, fill it in and run `sudo scripts/init.sh` (checks the host and `.env`, creates
+folders and the network).
 
 `DATA_ROOT` holds both `torrents/` and `media/`, so Radarr and Sonarr import with
 hardlinks instead of copies. In qBittorrent, set the default save path to
@@ -65,6 +69,7 @@ compose.yaml            includes every stack
 compose.gpu.yaml        optional override: host GPU for Jellyfin and Tdarr
 stacks/<stack>/         one compose file per stack (Core or Profile)
 worker/                 Tdarr node for a Linux Worker, and the Windows node's config
+scripts/setup.sh        interactive wizard that writes .env
 scripts/init.sh         host checks + folders + network
 scripts/verify.sh       post-start health and VPN check
 docs/                   guides (Profiles, backup and restore, transcoding)
