@@ -38,12 +38,17 @@ services:
       - 7878:7878 # Radarr
       - 8989:8989 # Sonarr
       - 6767:6767 # Bazarr
+      # Profile services behind the VPN. Nothing answers on these unless the Profile is on.
+      - 7879:7879 # Radarr VO (vo)
+      - 8990:8990 # Sonarr VO (vo)
+      - 9117:9117 # Jackett (jackett)
+      - 5010:5010 # mousehole (extras)
     volumes:
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/gluetun:/gluetun
     networks:
       media:
         # Other containers reach the apps behind the VPN by their own names.
-        aliases: [qbittorrent, prowlarr, flaresolverr, radarr, sonarr, bazarr]
+        aliases: [qbittorrent, prowlarr, flaresolverr, radarr, sonarr, bazarr, radarr-vo, sonarr-vo, jackett, mousehole]
 
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls475

@@ -1,0 +1,45 @@
+# Profile "dashboard": Homarr (a start page with every service) and Dockge (a web UI
+# for compose stacks).
+services:
+  homarr:
+    image: ghcr.io/homarr-labs/homarr:v1.77.2
+    container_name: homarr
+    profiles: [dashboard]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      # Not ":?": Compose would then demand it from Instances without this Profile.
+      # scripts/init.sh fails when it is empty and the Profile is on.
+      SECRET_ENCRYPTION_KEY: ${HOMARR_SECRET_KEY:-}
+    ports:
+      - 7575:7575
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/homarr:/appdata
+      # Only shows container status. Note that ":ro" stops writes to the socket file,
+      # not calls to the Docker API.
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - media
+
+  dockge:
+    image: louislam/dockge:1.5.0
+    container_name: dockge
+    profiles: [dashboard]
+    restart: unless-stopped
+    environment:
+      DOCKGE_STACKS_DIR: ${DOCKGE_STACKS_DIR:-/opt/stacks}
+    ports:
+      - 5001:5001
+    volumes:
+      # Read-write: Dockge starts, stops and edits stacks.
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/dockge:/app/data
+      # Same path inside and outside, so the stacks' relative paths still resolve.
+      - ${DOCKGE_STACKS_DIR:-/opt/stacks}:${DOCKGE_STACKS_DIR:-/opt/stacks}
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

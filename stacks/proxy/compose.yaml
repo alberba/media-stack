@@ -1,0 +1,26 @@
+# Profile "proxy": Nginx Proxy Manager, the Instance's HTTPS entry point from the
+# internet. Publish only Jellyfin (http://jellyfin:8096) and Seerr (http://seerr:5055):
+# every other service is for the Operator and stays on the LAN or behind the "remote"
+# Profile. Admin UI on port 81. Guide: docs/profiles.md.
+services:
+  npm:
+    image: jc21/nginx-proxy-manager:2.16.0
+    container_name: npm
+    profiles: [proxy]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+    ports:
+      - 80:80
+      - 443:443
+      - 81:81
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/npm/data:/data
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/npm/letsencrypt:/etc/letsencrypt
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

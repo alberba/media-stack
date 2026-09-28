@@ -17,6 +17,24 @@ DEFAULT_NETWORK="media-network"
 APPDATA_DIRS=(gluetun qbittorrent prowlarr radarr sonarr bazarr jellyfin/config jellyfin/cache)
 # Seerr runs as the image's fixed `node` user.
 SEERR_OWNER="1000:1000"
+# Folders under APPDATA_ROOT for each Profile, owned by PUID:PGID. Created only when
+# the Profile is listed in COMPOSE_PROFILES.
+declare -A PROFILE_DIRS=(
+  [vo]="radarr-vo sonarr-vo"
+  [jackett]="jackett"
+  [seeding]="qui cleanuparr"
+  [cleanup]="maintainerr"
+  [dashboard]="homarr dockge"
+  [monitoring]="beszel/data beszel/socket beszel/agent wud"
+  [extras]="mousehole filebrowser/config filebrowser/database"
+  [transcode]="tdarr/server tdarr/configs tdarr/logs tdarr/cache"
+)
+# Profile folders of services that run as root and keep secrets there (certificates,
+# the Tailscale node key): owned by root, not readable by others.
+declare -A PROFILE_ROOT_DIRS=(
+  [proxy]="npm/data npm/letsencrypt"
+  [remote]="tailscale"
+)
 # TRaSH-style layout: downloads and library on the same filesystem, so imports are hardlinks.
 DATA_DIRS=(torrents/movies torrents/tv media/movies media/tv)
 
@@ -102,6 +120,27 @@ check_vars() {
     local source; source="$(env_get BACKUP_SOURCE)"
     [ -z "$source" ] || [ -d "$source" ] || add_error "BACKUP_SOURCE $source does not exist: the backup would be empty."
   fi
+  if profile_on dashboard; then
+    [[ "$(env_get HOMARR_SECRET_KEY)" =~ ^[0-9a-fA-F]{64}$ ]] \
+      || add_error "HOMARR_SECRET_KEY must be 64 hex characters (needed by the dashboard Profile): generate it with 'openssl rand -hex 32'."
+  fi
+  if profile_on remote; then
+    # A node that already has its state keeps its identity and needs no new login.
+    [ -n "$(env_get TAILSCALE_AUTHKEY)" ] || [ -s "$(env_get APPDATA_ROOT)/tailscale/tailscaled.state" ] \
+      || add_error "TAILSCALE_AUTHKEY is empty and $(env_get APPDATA_ROOT)/tailscale has no node state (needed by the remote Profile)."
+    local route
+    for route in $(env_get TAILSCALE_ROUTES | tr ',' ' '); do
+      [[ "$route" =~ ^[0-9a-fA-F:.]+/[0-9]{1,3}$ ]] \
+        || add_error "TAILSCALE_ROUTES: '$route' is not a subnet like 192.168.1.0/24."
+    done
+  fi
+  if profile_on extras; then
+    [ -n "$(env_get MOUSEHOLE_AUTH_PASSWORD)" ] || add_error "MOUSEHOLE_AUTH_PASSWORD is empty (needed by the extras Profile)."
+  fi
+  if [[ "$(env_get COMPOSE_FILE)" == *compose.gpu.yaml* ]]; then
+    [[ "$(env_get RENDER_GID)" =~ ^[0-9]+$ ]] \
+      || add_error "RENDER_GID must be the host's render group id for compose.gpu.yaml: see 'getent group render'."
+  fi
 }
 
 # Creates a folder a service writes to and gives it to its owner. Parent folders
@@ -120,6 +159,18 @@ prepare_folders() {
   make_owned_dir "$root/seerr" "$SEERR_OWNER"
   # The backup container runs as root to read every service's files.
   if profile_on backup; then make_owned_dir "$root/backup" "0:0"; fi
+  local profile
+  for profile in "${!PROFILE_DIRS[@]}"; do
+    profile_on "$profile" || continue
+    for dir in ${PROFILE_DIRS[$profile]}; do make_owned_dir "$root/$dir" "$owner"; done
+  done
+  for profile in "${!PROFILE_ROOT_DIRS[@]}"; do
+    profile_on "$profile" || continue
+    for dir in ${PROFILE_ROOT_DIRS[$profile]}; do
+      make_owned_dir "$root/$dir" "0:0"
+      chmod 700 "$root/$dir"
+    done
+  done
 
   root="$(env_get DATA_ROOT)"
   for dir in "${DATA_DIRS[@]}"; do make_owned_dir "$root/$dir" "$owner"; done

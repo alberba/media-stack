@@ -51,6 +51,10 @@ OPENVPN_USER=
 OPENVPN_PASSWORD=
 RESTIC_PASSWORD=
 BACKUP_SOURCE=
+RENDER_GID=
+HOMARR_SECRET_KEY=
+TAILSCALE_AUTHKEY=
+MOUSEHOLE_AUTH_PASSWORD=
 EOF
 }
 
@@ -218,6 +222,118 @@ test_backup_source_must_exist_when_set() {
   run_init
   assert_status 1
   assert_output_contains "BACKUP_SOURCE"
+}
+
+# Folders each Profile's services write to, all owned by PUID:PGID unless listed below.
+declare -A PROFILE_DIRS=(
+  [vo]="radarr-vo sonarr-vo"
+  [jackett]="jackett"
+  [seeding]="qui cleanuparr"
+  [cleanup]="maintainerr"
+  [dashboard]="homarr dockge"
+  [monitoring]="beszel/data beszel/socket beszel/agent wud"
+  [proxy]="npm/data npm/letsencrypt"
+  [remote]="tailscale"
+  [extras]="mousehole filebrowser/config filebrowser/database"
+  [transcode]="tdarr/server tdarr/configs tdarr/logs tdarr/cache"
+)
+# Services that run as root and keep secrets in their folder.
+ROOT_DIRS="tailscale npm/data npm/letsencrypt"
+
+# Fills in what each Profile needs, so only the thing under test is missing.
+enable_profiles() {
+  set_var COMPOSE_PROFILES "$1"
+  set_var HOMARR_SECRET_KEY "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+  set_var TAILSCALE_AUTHKEY "tskey-auth-test"
+  set_var MOUSEHOLE_AUTH_PASSWORD "long-password"
+}
+
+test_every_profile_creates_its_folders_with_the_right_owner() {
+  local profile dir expected
+  enable_profiles "$(IFS=,; echo "${!PROFILE_DIRS[*]}")"
+  run_init
+  assert_status 0
+  for profile in "${!PROFILE_DIRS[@]}"; do
+    for dir in ${PROFILE_DIRS[$profile]}; do
+      assert_dir "$SANDBOX/appdata/$dir"
+      expected="1234:5678"
+      [[ " $ROOT_DIRS " == *" $dir "* ]] && expected="0:0"
+      assert_owner "$SANDBOX/appdata/$dir" "$expected"
+    done
+  done
+}
+
+test_profile_folders_are_not_created_when_the_profile_is_off() {
+  enable_profiles vo
+  run_init
+  assert_status 0
+  assert_dir "$SANDBOX/appdata/radarr-vo"
+  for dir in jackett tdarr tailscale homarr; do
+    [ ! -e "$SANDBOX/appdata/$dir" ] || fail "$dir created without its Profile"
+  done
+}
+
+test_tailscale_state_is_private() {
+  enable_profiles remote
+  run_init
+  [ "$(stat -c %a "$SANDBOX/appdata/tailscale")" = 700 ] || fail "tailscale state is readable by others"
+}
+
+test_dashboard_profile_requires_a_valid_homarr_key() {
+  enable_profiles dashboard
+  set_var HOMARR_SECRET_KEY ""
+  run_init
+  assert_status 1
+  assert_output_contains "HOMARR_SECRET_KEY"
+  set_var HOMARR_SECRET_KEY "too-short"
+  run_init
+  assert_status 1
+  assert_output_contains "openssl rand -hex 32"
+}
+
+test_remote_profile_requires_an_auth_key_for_a_new_node() {
+  enable_profiles remote
+  set_var TAILSCALE_AUTHKEY ""
+  run_init
+  assert_status 1
+  assert_output_contains "TAILSCALE_AUTHKEY"
+}
+
+test_remote_profile_keeps_an_existing_node_without_an_auth_key() {
+  enable_profiles remote
+  set_var TAILSCALE_AUTHKEY ""
+  mkdir -p "$SANDBOX/appdata/tailscale" && echo '{}' > "$SANDBOX/appdata/tailscale/tailscaled.state"
+  run_init
+  assert_status 0
+}
+
+test_remote_routes_must_be_subnets() {
+  enable_profiles remote
+  echo "TAILSCALE_ROUTES=192.168.0.0" >> "$ENV_FILE"
+  run_init
+  assert_status 1
+  assert_output_contains "TAILSCALE_ROUTES"
+  set_var TAILSCALE_ROUTES "192.168.0.0/24,10.0.0.0/8"
+  run_init
+  assert_status 0
+}
+
+test_extras_profile_requires_a_mousehole_password() {
+  enable_profiles extras
+  set_var MOUSEHOLE_AUTH_PASSWORD ""
+  run_init
+  assert_status 1
+  assert_output_contains "MOUSEHOLE_AUTH_PASSWORD"
+}
+
+test_gpu_override_requires_the_render_group() {
+  echo "COMPOSE_FILE=compose.yaml:compose.gpu.yaml" >> "$ENV_FILE"
+  run_init
+  assert_status 1
+  assert_output_contains "RENDER_GID"
+  set_var RENDER_GID 105
+  run_init
+  assert_status 0
 }
 
 test_is_idempotent() {

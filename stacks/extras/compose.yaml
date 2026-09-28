@@ -1,0 +1,95 @@
+# Profile "extras": small services the author's Instance uses. Each is optional on its
+# own terms, but they are turned on together. Setup: docs/profiles.md.
+services:
+  # Answers Seerr's "issue reported" webhook: blocklists the bad release in Radarr or
+  # Sonarr and searches for another, asks Bazarr for subtitles, and tells Telegram.
+  # Every setting comes from .env; there is no config file.
+  issue-automator:
+    build: ./issue-automator
+    image: media-stack-issue-automator:local
+    container_name: issue-automator
+    profiles: [extras]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      SEERR_URL: ${SEERR_URL:-http://seerr:5055}
+      SEERR_API_KEY: ${SEERR_API_KEY:-}
+      RADARR_URL: ${RADARR_URL:-http://radarr:7878}
+      RADARR_API_KEY: ${RADARR_API_KEY:-}
+      SONARR_URL: ${SONARR_URL:-http://sonarr:8989}
+      SONARR_API_KEY: ${SONARR_API_KEY:-}
+      BAZARR_URL: ${BAZARR_URL:-http://bazarr:6767}
+      BAZARR_API_KEY: ${BAZARR_API_KEY:-}
+      # Only with the "vo" Profile: its managers, and the ids Seerr gives them.
+      RADARR_VO_URL: ${RADARR_VO_URL:-http://radarr-vo:7879}
+      RADARR_VO_API_KEY: ${RADARR_VO_API_KEY:-}
+      SEERR_RADARR_VO_SERVER_ID: ${SEERR_RADARR_VO_SERVER_ID:-}
+      SONARR_VO_URL: ${SONARR_VO_URL:-http://sonarr-vo:8990}
+      SONARR_VO_API_KEY: ${SONARR_VO_API_KEY:-}
+      SEERR_SONARR_VO_SERVER_ID: ${SEERR_SONARR_VO_SERVER_ID:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - 5056:5056
+    networks:
+      - media
+
+  # Keeps MyAnonamouse's record of your seedbox IP up to date. Behind the VPN, so it
+  # reports the VPN's IP; its UI is published by gluetun on 5010.
+  mousehole:
+    image: tmmrtn/mousehole:0.5.0
+    container_name: mousehole
+    profiles: [extras]
+    restart: unless-stopped
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      MOUSEHOLE_AUTH_PASSWORD: ${MOUSEHOLE_AUTH_PASSWORD:-}
+      # The address you open it at, e.g. 192.168.1.10:5010 (comma separated).
+      MOUSEHOLE_ALLOWED_HOSTS: ${MOUSEHOLE_ALLOWED_HOSTS:-}
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/mousehole:/var/lib/mousehole
+
+  # SOCKS proxy through Tor, for indexers that are only reachable that way. In Prowlarr:
+  # Settings > Indexers > add a Socks5 proxy at tor:9150. Built locally from Alpine.
+  tor:
+    build: ./tor
+    image: media-stack-tor:local
+    container_name: tor
+    profiles: [extras]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS --socks5-hostname localhost:9150 https://check.torproject.org/api/ip || exit 1"]
+      interval: 1m
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    networks:
+      - media
+
+  # Web file manager for the Media library and downloads (all of DATA_ROOT).
+  filebrowser:
+    image: filebrowser/filebrowser:v2.63.23
+    container_name: filebrowser
+    profiles: [extras]
+    restart: unless-stopped
+    # Files it creates belong to the same owner as the rest of the library.
+    user: ${PUID:?set PUID in .env}:${PGID:?set PGID in .env}
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+    ports:
+      - 8085:80
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/filebrowser/config:/config
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/filebrowser/database:/database
+      - ${DATA_ROOT:?set DATA_ROOT in .env}:/srv
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

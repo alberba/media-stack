@@ -26,10 +26,16 @@ jobs:
       - uses: actions/checkout@v5
       - name: Lint scripts
         run: shellcheck scripts/*.sh tests/*.sh stacks/*/*.sh .githooks/pre-commit
-      - name: Validate the Core with docker compose config
+      - name: Validate the Core, and the Core with every Profile, with docker compose config
         run: |
           sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > .env
           docker compose config --quiet
+          docker compose --profile '*' config --quiet
+          COMPOSE_FILE=compose.yaml:compose.gpu.yaml docker compose --profile '*' config --quiet
+      - name: Validate the Worker's compose
+        run: |
+          sed -E 's/^([A-Z_]+)=$/\1=ci-dummy/' worker/.env.example > worker/.env
+          docker compose --project-directory worker config --quiet
       - name: Template tests
         run: tests/template.test.sh
       - name: init.sh tests
@@ -38,6 +44,12 @@ jobs:
         run: tests/verify.test.sh
       - name: pre-commit hook tests
         run: tests/hooks.test.sh
+      - name: extras Profile issue-automator tests
+        run: tests/issue-automator.test.sh
+      - name: transcode Profile Tdarr plugin tests
+        run: tests/tdarr-plugin.test.sh
+      - name: Build the locally built Profile images
+        run: docker compose --profile '*' build
       - name: Install sqlite3 for the backup tests
         run: command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
       - name: backup Profile script tests
