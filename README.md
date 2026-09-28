@@ -22,11 +22,24 @@ Every Instance runs these services:
 ## Profiles
 
 Optional groups of services on top of the Core, turned on with `COMPOSE_PROFILES` in
-`.env` (comma separated).
+`.env` (comma separated). Setup for each: [docs/profiles.md](docs/profiles.md).
 
 | Profile | What it adds |
 | --- | --- |
 | `backup` | Nightly encrypted copy of the App data to Google Drive, with restore. See [docs/backup.md](docs/backup.md) ([español](docs/backup.es.md)). |
+| `vo` | A second Radarr and Sonarr for an original-version library. |
+| `jackett` | Jackett, as a Torznab bridge for indexers Prowlarr lacks. |
+| `seeding` | qui (qBittorrent web UI) and cleanuparr (download cleanup). |
+| `cleanup` | Maintainerr: removes library items by rules. |
+| `dashboard` | Homarr (start page) and Dockge (compose UI). |
+| `monitoring` | Beszel (metrics and alerts) and What's Up Docker (image updates). |
+| `proxy` | Nginx Proxy Manager, to publish only Jellyfin and Seerr on the internet. |
+| `remote` | Tailscale, with the LAN as an optional subnet route. |
+| `extras` | issue-automator (acts on Seerr issues), mousehole, a Tor proxy and File Browser. |
+| `transcode` | Tdarr server, for a Worker with a GPU to re-encode large files that are no longer seeding. See [docs/transcode.md](docs/transcode.md). |
+
+Hardware transcoding with the host's GPU (`/dev/dri`) for Jellyfin and Tdarr is an
+override, `compose.gpu.yaml`, turned on with `COMPOSE_FILE` in `.env`.
 
 ## Quickstart
 
@@ -49,10 +62,12 @@ hardlinks instead of copies. In qBittorrent, set the default save path to
 
 ```
 compose.yaml            includes every stack
-stacks/<stack>/         one compose file per stack
+compose.gpu.yaml        optional override: host GPU for Jellyfin and Tdarr
+stacks/<stack>/         one compose file per stack (Core or Profile)
+worker/                 Tdarr node for a Linux Worker, and the Windows node's config
 scripts/init.sh         host checks + folders + network
 scripts/verify.sh       post-start health and VPN check
-docs/                   guides (backup and restore)
+docs/                   guides (Profiles, backup and restore, transcoding)
 .env.example            every setting, commented
 ```
 
@@ -64,6 +79,7 @@ Nothing specific to an Instance may be committed (see `docs/adr/0001`). The
 ```sh
 git config core.hooksPath .githooks   # gitleaks pre-commit hook (gitleaks or Docker)
 tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
+tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # need python3, and node or Docker
 tests/backup.test.sh && tests/backup-image.test.sh   # needs sqlite3 and Docker
 ```
 

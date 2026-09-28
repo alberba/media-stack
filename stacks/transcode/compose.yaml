@@ -1,0 +1,41 @@
+# Profile "transcode": the Tdarr server. It only schedules work: it has no internal
+# node, so the Instance does no transcoding itself. A Worker (a PC with a GPU) runs the
+# Tdarr node and transcodes over an SMB share of the library; see docs/transcode.md.
+# To also give Tdarr the host's GPU, use the override in compose.gpu.yaml.
+services:
+  tdarr:
+    image: ghcr.io/haveagitgat/tdarr:2.87.01
+    container_name: tdarr
+    profiles: [transcode]
+    restart: unless-stopped
+    environment:
+      PUID: ${PUID:?set PUID in .env}
+      PGID: ${PGID:?set PGID in .env}
+      TZ: ${TZ:?set TZ in .env}
+      serverIP: 0.0.0.0
+      serverPort: "8266"
+      webUIPort: "8265"
+      inContainer: "true"
+      internalNode: "false"
+      ffmpegVersion: "7"
+    ports:
+      - 8265:8265 # web UI
+      - 8266:8266 # Workers' nodes connect here
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/tdarr/server:/app/server
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/tdarr/configs:/app/configs
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/tdarr/logs:/app/logs
+      - ${DATA_ROOT:?set DATA_ROOT in .env}/media:/data/media
+      # The library's transcode cache path. Workers map it to a folder of their own,
+      # so transcodes never write through the share.
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/tdarr/cache:/temp
+      # The Template's plugin: NVENC HEVC re-encode of large files that are no longer
+      # seeding. Tdarr hands it to every node.
+      - ./plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js:/app/server/Tdarr/Plugins/Local/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js:ro
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

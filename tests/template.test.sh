@@ -10,6 +10,25 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 CORE_SERVICES="bazarr flaresolverr gluetun jellyfin prowlarr qbittorrent radarr seerr sonarr"
 BEHIND_VPN="bazarr flaresolverr prowlarr qbittorrent radarr sonarr"
 
+# What each Profile adds on top of the Core.
+declare -A PROFILE_SERVICES=(
+  [backup]="backup"
+  [vo]="radarr-vo sonarr-vo"
+  [jackett]="jackett"
+  [seeding]="cleanuparr qui"
+  [cleanup]="maintainerr"
+  [dashboard]="dockge homarr"
+  [monitoring]="beszel beszel-agent wud"
+  [proxy]="npm"
+  [remote]="tailscale"
+  [extras]="filebrowser issue-automator mousehole tor"
+  [transcode]="tdarr"
+)
+# Profile services that talk to trackers or indexers, and the port gluetun publishes for each.
+declare -A VPN_PORTS=([radarr-vo]=7879 [sonarr-vo]=8990 [jackett]=9117 [mousehole]=5010)
+# The only service that needs to write through the Docker socket (it manages stacks).
+SOCKET_WRITERS="dockge"
+
 setup() {
   SANDBOX="$(mktemp -d)"
   # .env.example with every empty value filled, as an Operator would (BACKUP_SOURCE
@@ -19,6 +38,24 @@ setup() {
 teardown() { rm -rf "$SANDBOX"; }
 
 compose() { docker compose --project-directory "$REPO" --env-file "$SANDBOX/.env" "$@"; }
+# The Worker's own project, with worker/.env.example filled in the same way.
+worker_compose() {
+  sed -E 's/^([A-Z_]+)=$/\1=dummy/' "$REPO/worker/.env.example" > "$SANDBOX/worker.env"
+  docker compose --project-directory "$REPO/worker" --env-file "$SANDBOX/worker.env" "$@"
+}
+
+# Prints a Python expression evaluated over the model (`s` = the services dict) of
+# `compose --profile '*' <extra args> config`.
+all_profiles_json() { compose --profile '*' "$@" config --format json; }
+query() {
+  local expr="$1"; shift
+  python3 -c '
+import json, sys
+s = json.load(sys.stdin)["services"]
+args = sys.argv[2:]
+r = eval(sys.argv[1])
+print(r if isinstance(r, str) else json.dumps(r))' "$expr" "$@"
+}
 
 test_core_config_is_valid() {
   OUTPUT="$(compose config -q 2>&1)"; STATUS=$?
@@ -36,7 +73,8 @@ test_every_image_is_pinned() {
   while read -r image; do
     [[ "$image" == *:* ]] || fail "$image has no tag"
     [[ "$image" != *:latest ]] || fail "$image uses :latest"
-  done < <(compose --profile '*' config --images)
+  done < <(compose --profile '*' config --images; worker_compose config --images)
+  worker_compose config --images | grep -q tdarr_node || fail "the Worker's image was not checked"
 }
 
 test_backup_profile_is_valid_and_adds_only_the_backup_service() {
@@ -45,6 +83,117 @@ test_backup_profile_is_valid_and_adds_only_the_backup_service() {
   assert_status 0
   services="$(compose --profile backup config --services | sort | xargs)"
   [ "$services" = "backup $CORE_SERVICES" ] || fail "expected 'backup $CORE_SERVICES', got '$services'"
+}
+
+test_every_profile_is_valid_and_adds_exactly_its_services() {
+  local profile services expected
+  for profile in "${!PROFILE_SERVICES[@]}"; do
+    OUTPUT="$(compose --profile "$profile" config -q 2>&1)"; STATUS=$?
+    [ "$STATUS" = 0 ] || fail "Profile $profile is invalid: $OUTPUT"
+    services="$(compose --profile "$profile" config --services | sort | xargs)"
+    expected="$(echo "${PROFILE_SERVICES[$profile]} $CORE_SERVICES" | xargs -n1 | sort | xargs)"
+    [ "$services" = "$expected" ] || fail "Profile $profile: expected '$expected', got '$services'"
+  done
+}
+
+test_core_and_all_profiles_are_valid_together() {
+  OUTPUT="$(compose --profile '*' config -q 2>&1)"; STATUS=$?
+  assert_status 0
+  OUTPUT="$(COMPOSE_PROFILES="$(IFS=,; echo "${!PROFILE_SERVICES[*]}")" \
+    docker compose --project-directory "$REPO" --env-file "$SANDBOX/.env" config --services | wc -l)"
+  local expected
+  expected="$(echo "$CORE_SERVICES ${PROFILE_SERVICES[*]}" | wc -w)"
+  [ "$OUTPUT" = "$expected" ] || fail "COMPOSE_PROFILES with every Profile gives $OUTPUT services, expected $expected"
+}
+
+test_profile_services_that_reach_trackers_go_through_the_vpn() {
+  local json service
+  json="$(all_profiles_json)"
+  for service in "${!VPN_PORTS[@]}"; do
+    [ "$(query 's[args[0]].get("network_mode","")' "$service" <<< "$json")" = "service:gluetun" ] \
+      || fail "$service is not behind the VPN"
+    query 'any(str(p.get("published")) == args[0] for p in s["gluetun"]["ports"])' "${VPN_PORTS[$service]}" <<< "$json" | grep -q true \
+      || fail "gluetun does not publish $service's port ${VPN_PORTS[$service]}"
+    query 'args[0] in s["gluetun"]["networks"]["media"]["aliases"]' "$service" <<< "$json" | grep -q true \
+      || fail "gluetun has no network alias for $service"
+  done
+}
+
+test_vo_managers_listen_on_their_own_ports() {
+  local json
+  json="$(all_profiles_json)"
+  [ "$(query 's["radarr-vo"]["environment"]["RADARR__SERVER__PORT"]' <<< "$json")" = 7879 ] || fail "radarr-vo does not listen on 7879"
+  [ "$(query 's["sonarr-vo"]["environment"]["SONARR__SERVER__PORT"]' <<< "$json")" = 8990 ] || fail "sonarr-vo does not listen on 8990"
+}
+
+test_docker_socket_is_read_only_unless_write_is_needed() {
+  local json offenders
+  json="$(all_profiles_json)"
+  offenders="$(query '" ".join(sorted(n for n, v in s.items()
+      for m in v.get("volumes", []) if m.get("source") == "/var/run/docker.sock"
+      and not m.get("read_only") and n not in args[0].split()))' "$SOCKET_WRITERS" <<< "$json")" \
+    || fail "could not read the model"
+  [ -z "$offenders" ] || fail "Docker socket mounted read-write in: $offenders"
+  query 'sum(m.get("source") == "/var/run/docker.sock" for v in s.values() for m in v.get("volumes", []))' <<< "$json" \
+    | grep -qx '[1-9][0-9]*' || fail "no service mounts the Docker socket: the check above tests nothing"
+}
+
+test_tdarr_server_has_no_internal_node_and_ships_the_nvenc_plugin() {
+  local json
+  json="$(all_profiles_json)"
+  [ "$(query 's["tdarr"]["environment"]["internalNode"]' <<< "$json")" = false ] || fail "Tdarr runs an internal node"
+  query 'any(m["target"].endswith("/Plugins/Local/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js") and m.get("read_only")
+      for m in s["tdarr"]["volumes"])' <<< "$json" | grep -q true || fail "the NVENC plugin is not mounted into Tdarr"
+}
+
+test_gpu_override_gives_jellyfin_and_tdarr_the_render_device() {
+  local json service
+  json="$(all_profiles_json -f "$REPO/compose.yaml" -f "$REPO/compose.gpu.yaml")"
+  for service in jellyfin tdarr; do
+    query 'any(d == "/dev/dri:/dev/dri" or (isinstance(d, dict) and d.get("source") == "/dev/dri")
+      for d in s[args[0]].get("devices", []))' "$service" <<< "$json" | grep -q true \
+      || fail "$service has no /dev/dri"
+    [ "$(query 's[args[0]].get("group_add")' "$service" <<< "$json")" = '["dummy"]' ] || fail "$service is not in the render group"
+  done
+}
+
+test_gpu_override_is_turned_on_from_the_env() {
+  grep -q '^# *COMPOSE_FILE=compose.yaml:compose.gpu.yaml' "$REPO/.env.example" || fail ".env.example does not show how to turn on the GPU override"
+  echo "COMPOSE_FILE=compose.yaml:compose.gpu.yaml" >> "$SANDBOX/.env"
+  compose config --format json | query '"/dev/dri" in json.dumps(s["jellyfin"].get("devices", []))' | grep -q true \
+    || fail "COMPOSE_FILE in .env does not apply the GPU override"
+}
+
+test_issue_automator_is_built_locally_with_no_config_file() {
+  local json
+  json="$(all_profiles_json)"
+  query '"build" in s["issue-automator"]' <<< "$json" | grep -q true || fail "issue-automator is not built locally"
+  [ "$(query 's["issue-automator"].get("volumes", [])' <<< "$json")" = "[]" ] || fail "issue-automator mounts files"
+  [ "$(query 's["issue-automator"]["environment"]["SEERR_API_KEY"]' <<< "$json")" = dummy ] || fail "issue-automator does not take SEERR_API_KEY from .env"
+}
+
+test_instance_specific_values_come_from_the_env() {
+  local json
+  json="$(all_profiles_json)"
+  [ "$(query 's["tailscale"]["environment"]["TS_ROUTES"]' <<< "$json")" = dummy ] || fail "Tailscale routes do not come from .env"
+  [ "$(query 's["mousehole"]["environment"]["MOUSEHOLE_ALLOWED_HOSTS"]' <<< "$json")" = dummy ] || fail "mousehole allowed host does not come from .env"
+  [ "$(query 's["homarr"]["environment"]["SECRET_ENCRYPTION_KEY"]' <<< "$json")" = dummy ] || fail "homarr key does not come from .env"
+  [ "$(query 's["wud"]["environment"]["WUD_AUTH_ADMIN_PASSWORD"]' <<< "$json")" = dummy ] || fail "WUD login does not come from .env"
+  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN"]' <<< "$json")" = dummy ] || fail "WUD alerts do not use TELEGRAM_BOT_TOKEN"
+}
+
+test_tailscale_state_is_kept_in_the_app_data() {
+  query 'any(m["target"] == "/var/lib/tailscale" and m["source"] == "/opt/media-stack/appdata/tailscale"
+      for m in s["tailscale"]["volumes"])' < <(all_profiles_json) | grep -q true || fail "Tailscale state is not under APPDATA_ROOT"
+}
+
+test_worker_compose_is_valid_and_matches_the_server_version() {
+  local server node
+  OUTPUT="$(worker_compose config -q 2>&1)"; STATUS=$?
+  assert_status 0
+  node="$(worker_compose config --images)"
+  server="$(compose --profile transcode config --images | grep tdarr)"
+  [ "${node##*:}" = "${server##*:}" ] || fail "Worker node $node and server $server versions differ"
 }
 
 test_backup_profile_backs_up_the_app_data_by_default() {
@@ -97,14 +246,18 @@ gitignored() { git -C "$REPO" check-ignore -q --no-index "$1"; }
 test_gitignore_blocks_instance_files() {
   local path
   for path in .env .env.local appdata/radarr/radarr.db stacks/arr/config/config.xml notes.txt secrets.json compose.override.yaml \
-      stacks/arr/compose.override.yaml examples/.env; do
+      stacks/arr/compose.override.yaml examples/.env worker/.env worker/configs/Tdarr_Node_Config.json \
+      stacks/extras/issue-automator/config.json; do
     gitignored "$path" || fail "$path is not ignored"
   done
 }
 
 test_gitignore_allows_template_files() {
   local path
-  for path in compose.yaml stacks/arr/compose.yaml .env.example scripts/init.sh docs/install.md \
+  for path in compose.yaml compose.gpu.yaml stacks/arr/compose.yaml .env.example scripts/init.sh docs/install.md \
+      stacks/extras/issue-automator/Dockerfile stacks/extras/issue-automator/main.py stacks/extras/tor/Dockerfile \
+      stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js worker/compose.yaml worker/.env.example \
+      worker/Tdarr_Node_Config.windows.json.example \
       stacks/backup/Dockerfile stacks/backup/media-backup.sh docs/backup.es.md \
       tests/lib.sh .github/workflows/ci.yml .githooks/pre-commit README.md LICENSE renovate.json \
       .gitleaks.toml .gitignore; do

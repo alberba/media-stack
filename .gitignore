@@ -7,6 +7,7 @@
 !/.gitleaks.toml
 !/.env.example
 !/compose.yaml
+!/compose.gpu.yaml
 !/LICENSE
 !/README*.md
 !/CONTEXT.md
@@ -17,6 +18,13 @@
 !/stacks/*/README.md
 !/stacks/*/Dockerfile
 !/stacks/*/*.sh
+# Services built locally: one folder per image inside its stack.
+!/stacks/*/*/Dockerfile
+!/stacks/*/*/*.py
+!/stacks/transcode/plugins/*.js
+# The Worker: its own compose project, run on the Worker, not on the Instance.
+!/worker/compose.yaml
+!/worker/*.example
 !/scripts/*.sh
 !/tests/*.sh
 !/docs/**/*.md

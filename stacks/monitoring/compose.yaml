@@ -1,0 +1,65 @@
+# Profile "monitoring": Beszel (host and container metrics, with alerts) and What's Up
+# Docker (tells you when an image has a newer version).
+services:
+  beszel:
+    image: henrygd/beszel:0.20.0
+    container_name: beszel
+    profiles: [monitoring]
+    restart: unless-stopped
+    environment:
+      APP_URL: ${BESZEL_APP_URL:-http://localhost:8090}
+    ports:
+      - 8090:8090
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/beszel/data:/beszel_data
+      # The agent below talks to the hub through a socket in this folder.
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/beszel/socket:/beszel_socket
+    networks:
+      - media
+
+  beszel-agent:
+    image: henrygd/beszel-agent:0.20.0
+    container_name: beszel-agent
+    profiles: [monitoring]
+    restart: unless-stopped
+    # Host network, to report the host's real network traffic.
+    network_mode: host
+    environment:
+      LISTEN: /beszel_socket/beszel.sock
+      HUB_URL: http://localhost:8090
+      # Both come from the hub: "Add system" shows the public key and the token.
+      KEY: ${BESZEL_AGENT_KEY:-}
+      TOKEN: ${BESZEL_AGENT_TOKEN:-}
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/beszel/agent:/var/lib/beszel-agent
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/beszel/socket:/beszel_socket
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+
+  wud:
+    image: getwud/wud:9.2.0
+    container_name: wud
+    profiles: [monitoring]
+    restart: unless-stopped
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      # It can see every container: keep its UI behind a login (scripts/init.sh
+      # requires the password when the Profile is on).
+      WUD_AUTH_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
+      WUD_AUTH_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
+      WUD_WATCHER_LOCAL_CRON: ${WUD_CRON:-0 5 * * *}
+      # Telegram message when an update is found. With these empty, WUD only logs
+      # that the trigger is off.
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_CHATID: ${TELEGRAM_CHAT_ID:-}
+    ports:
+      - 3000:3000
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/wud:/store
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

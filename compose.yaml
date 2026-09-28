@@ -1,5 +1,7 @@
 # Root of the Template. Each stack lives in stacks/<name>/compose.yaml.
 # Which Profiles run is chosen with COMPOSE_PROFILES in .env; the Core always runs.
+# Every Profile's stack is always included: its services carry `profiles:`, so they
+# only start when their Profile is listed.
 name: media-stack
 
 include:
@@ -7,4 +9,15 @@ include:
   - stacks/arr/compose.yaml
   - stacks/jellyfin/compose.yaml
   - stacks/seerr/compose.yaml
+  # Profiles
   - stacks/backup/compose.yaml
+  - stacks/vo/compose.yaml
+  - stacks/jackett/compose.yaml
+  - stacks/seeding/compose.yaml
+  - stacks/cleanup/compose.yaml
+  - stacks/dashboard/compose.yaml
+  - stacks/monitoring/compose.yaml
+  - stacks/proxy/compose.yaml
+  - stacks/remote/compose.yaml
+  - stacks/extras/compose.yaml
+  - stacks/transcode/compose.yaml

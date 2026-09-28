@@ -1,0 +1,22 @@
+# Profile "cleanup": Maintainerr removes library items by rules (e.g. watched and old),
+# through Jellyfin, Seerr, Radarr and Sonarr, all reachable by name on the media network.
+services:
+  maintainerr:
+    image: ghcr.io/maintainerr/maintainerr:3.29.0
+    container_name: maintainerr
+    profiles: [cleanup]
+    restart: unless-stopped
+    user: ${PUID:?set PUID in .env}:${PGID:?set PGID in .env}
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+    ports:
+      - 6246:6246
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/maintainerr:/opt/data
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

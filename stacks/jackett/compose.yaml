@@ -1,0 +1,28 @@
+# Profile "jackett": Jackett as a Torznab bridge for indexers Prowlarr has no definition
+# for. Behind the VPN like Prowlarr; its UI is published by gluetun on 9117. Indexers
+# and their cookies live in its App data, never in this repo. Setup: docs/profiles.md.
+services:
+  jackett:
+    image: lscr.io/linuxserver/jackett:v0.24.2581-ls27
+    container_name: jackett
+    profiles: [jackett]
+    restart: unless-stopped
+    network_mode: service:gluetun
+    depends_on:
+      gluetun:
+        condition: service_healthy
+    environment:
+      PUID: ${PUID:?set PUID in .env}
+      PGID: ${PGID:?set PGID in .env}
+      TZ: ${TZ:?set TZ in .env}
+      # The image is pinned; Renovate bumps it.
+      AUTO_UPDATE: "false"
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jackett:/config
+    healthcheck:
+      # Any HTTP answer counts: the UI redirects to its login.
+      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:9117 || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s

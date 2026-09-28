@@ -1,0 +1,16 @@
+# Override: hardware transcoding with the host's GPU (Intel or AMD, through /dev/dri)
+# for Jellyfin and Tdarr. Turn it on in .env with:
+#   COMPOSE_FILE=compose.yaml:compose.gpu.yaml
+# and set RENDER_GID to the host's render group (`getent group render | cut -d: -f3`).
+services:
+  jellyfin:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${RENDER_GID:?set RENDER_GID in .env (getent group render)}
+
+  tdarr:
+    devices:
+      - /dev/dri:/dev/dri
+    group_add:
+      - ${RENDER_GID:?set RENDER_GID in .env (getent group render)}
