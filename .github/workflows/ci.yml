@@ -40,6 +40,8 @@ jobs:
         run: tests/template.test.sh
       - name: init.sh tests
         run: sudo tests/init.test.sh
+      - name: setup.sh tests
+        run: tests/setup.test.sh
       - name: verify.sh tests
         run: tests/verify.test.sh
       - name: pre-commit hook tests
