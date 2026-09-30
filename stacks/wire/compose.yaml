@@ -1,0 +1,56 @@
+# The Wiring (CONTEXT.md, docs/adr/0002-wiring-only-seeds.md). Two one-shot runs of the
+# same image, on every `docker compose up`; neither stays running.
+#   wire-seed  before the apps start: writes their keys and passwords from .env into
+#              App data files that do not exist yet (every app waits for it).
+#   wire       once they answer: connects them to each other and syncs the quality
+#              profile. Only adds what is missing; never changes what is there.
+# Its log says what it did: `docker compose logs wire`.
+x-wire: &wire
+  build: ./
+  image: media-stack-wire:local
+  restart: "no"
+  environment: &wire-env
+    TZ: ${TZ:?set TZ in .env}
+    PUID: ${PUID:?set PUID in .env}
+    PGID: ${PGID:?set PGID in .env}
+    COMPOSE_PROFILES: ${COMPOSE_PROFILES:-}
+    VPN_PORT_FORWARDING: ${VPN_PORT_FORWARDING:-off}
+    RADARR_API_KEY: ${RADARR_API_KEY:-}
+    SONARR_API_KEY: ${SONARR_API_KEY:-}
+    RADARR_VO_API_KEY: ${RADARR_VO_API_KEY:-}
+    SONARR_VO_API_KEY: ${SONARR_VO_API_KEY:-}
+    PROWLARR_API_KEY: ${PROWLARR_API_KEY:-}
+    BAZARR_API_KEY: ${BAZARR_API_KEY:-}
+    SEERR_API_KEY: ${SEERR_API_KEY:-}
+    QBITTORRENT_USER: ${QBITTORRENT_USER:-admin}
+    QBITTORRENT_PASSWORD: ${QBITTORRENT_PASSWORD:-}
+    JELLYFIN_ADMIN_USER: ${JELLYFIN_ADMIN_USER:-}
+    JELLYFIN_ADMIN_PASSWORD: ${JELLYFIN_ADMIN_PASSWORD:-}
+    QUALITIES: ${QUALITIES:-}
+
+services:
+  wire-seed:
+    <<: *wire
+    container_name: wire-seed
+    command: ["seed"]
+    network_mode: none
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}:/appdata
+      - ${DATA_ROOT:?set DATA_ROOT in .env}:/data
+
+  wire:
+    <<: *wire
+    container_name: wire
+    command: ["wire"]
+    volumes:
+      # Read only: it reads the keys the apps already use. Recyclarr keeps its own
+      # config and cache in APPDATA_ROOT/wire.
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}:/appdata:ro
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/wire:/config
+    networks:
+      - media
+
+networks:
+  media:
+    name: ${MEDIA_NETWORK:-media-network}
+    external: true

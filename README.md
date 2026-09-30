@@ -82,8 +82,8 @@ scripts/setup.sh && docker compose up -d && scripts/verify.sh
 ## Guías
 
 1. [Instalación](docs/install.md): requisitos, el asistente, primer arranque y problemas frecuentes.
-2. [Conectar las apps](docs/wiring.md): qBittorrent, Prowlarr, Radarr/Sonarr, Bazarr,
-   Jellyfin y Seerr; la estructura de `/data` y los hardlinks.
+2. [Conectar las apps](docs/wiring.md): lo que el contenedor `wire` conecta solo, lo que
+   queda a mano, la estructura de `/data` y los hardlinks.
 3. [Checklist de seguridad](docs/security.md): qué exponer, Access Lists y Tailscale.
 4. [Copia de seguridad y restauración](docs/backup.md). Solo en inglés:
    [Perfiles](docs/profiles.md), [transcodificación](docs/transcode.md) y

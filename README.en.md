@@ -82,8 +82,8 @@ scripts/setup.sh && docker compose up -d && scripts/verify.sh
 ## Guides
 
 1. [Install](docs/install.en.md): requirements, the wizard, first start, troubleshooting.
-2. [Wiring the apps](docs/wiring.en.md): qBittorrent, Prowlarr, Radarr/Sonarr, Bazarr,
-   Jellyfin and Seerr; the `/data` layout and hardlinks.
+2. [Wiring the apps](docs/wiring.en.md): what the `wire` container connects on its own,
+   what is left to you, the `/data` layout and hardlinks.
 3. [Security checklist](docs/security.en.md): what to expose, Access Lists, Tailscale.
 4. [Profiles](docs/profiles.md), [backup and restore](docs/backup.en.md),
    [transcoding](docs/transcode.md), [Jellyfin customizations](docs/jellyfin-customizations.md) (optional).

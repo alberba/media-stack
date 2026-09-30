@@ -7,7 +7,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/tests/lib.sh"
 
-CORE_SERVICES="bazarr flaresolverr gluetun jellyfin prowlarr qbittorrent radarr seerr sonarr"
+CORE_SERVICES="bazarr flaresolverr gluetun jellyfin prowlarr qbittorrent radarr seerr sonarr wire wire-seed"
 BEHIND_VPN="bazarr flaresolverr prowlarr qbittorrent radarr sonarr"
 
 # What each Profile adds on top of the Core.
@@ -223,11 +223,24 @@ test_every_core_service_has_a_healthcheck() {
   local json service
   json="$(compose config --format json)"
   for service in $CORE_SERVICES; do
-    # jellyfin and gluetun ship a HEALTHCHECK in their images.
-    case "$service" in jellyfin|gluetun) continue ;; esac
+    # jellyfin and gluetun ship a HEALTHCHECK in their images; the Wiring runs once and exits.
+    case "$service" in jellyfin|gluetun|wire|wire-seed) continue ;; esac
     python3 -c 'import json,sys; s=json.load(sys.stdin)["services"][sys.argv[1]]; sys.exit(0 if s.get("healthcheck",{}).get("test") else 1)' "$service" <<< "$json" \
       || fail "$service has no healthcheck"
   done
+}
+
+test_the_wiring_runs_once_and_the_apps_wait_for_its_seed() {
+  local json service
+  json="$(all_profiles_json)"
+  for service in wire wire-seed; do
+    [ "$(query 's[args[0]].get("restart")' "$service" <<< "$json")" = no ] || fail "$service must not restart"
+  done
+  for service in qbittorrent prowlarr radarr sonarr bazarr radarr-vo sonarr-vo; do
+    [ "$(query 's[args[0]]["depends_on"]["wire-seed"]["condition"]' "$service" <<< "$json")" = service_completed_successfully ] \
+      || fail "$service does not wait for wire-seed"
+  done
+  [ "$(query 's["wire-seed"].get("network_mode")' <<< "$json")" = none ] || fail "wire-seed needs no network"
 }
 
 test_profiles_come_from_the_root_env() {

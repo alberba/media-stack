@@ -46,6 +46,8 @@ jobs:
         run: tests/verify.test.sh
       - name: pre-commit hook tests
         run: tests/hooks.test.sh
+      - name: Wiring tests
+        run: tests/wire.test.sh
       - name: extras Profile issue-automator tests
         run: tests/issue-automator.test.sh
       - name: transcode Profile Tdarr plugin tests
