@@ -47,7 +47,7 @@ services:
       start_period: 30s
 
   bazarr:
-    image: lscr.io/linuxserver/bazarr:v1.6.0-ls363
+    image: lscr.io/linuxserver/bazarr:v1.6.2-ls366
     container_name: bazarr
     restart: unless-stopped
     network_mode: service:gluetun
