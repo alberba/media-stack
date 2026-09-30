@@ -1,96 +1,123 @@
 # media-stack
 
-A self-hosted media server (download automation, requests, playback) as a Docker
-Compose Template you can deploy on any Linux machine with Docker.
+[English](README.en.md)
 
-## Core
+Un servidor multimedia autoalojado (descargas automáticas, peticiones y reproducción)
+como Plantilla de Docker Compose que puedes desplegar en cualquier máquina Linux con Docker.
 
-Every Instance runs these services:
+## Arquitectura
 
-| Service | Role | Port | Behind the VPN |
+```mermaid
+flowchart LR
+  internet((Internet)) -->|80/443| npm["NPM<br/>(Perfil proxy)"]
+  tailnet((Tailnet)) -.-> ts["Tailscale<br/>(Perfil remote)"]
+  npm --> jellyfin[Jellyfin]
+  npm --> seerr[Seerr]
+  seerr --> jellyfin
+  seerr --> arr
+  subgraph vpn["red de gluetun: todo el tráfico sale por la VPN"]
+    arr["Radarr · Sonarr · Bazarr"]
+    prowlarr["Prowlarr + FlareSolverr"]
+    qbit[qBittorrent]
+    prowlarr --> arr
+    arr --> qbit
+  end
+  vpn --> vpnprov((Proveedor VPN))
+  qbit --> data[("DATA_ROOT<br/>torrents/ + media/")]
+  arr --> data
+  jellyfin --> data
+```
+
+Los servicios de detrás de la VPN comparten la red de gluetun: si la VPN cae, se quedan
+sin red. Jellyfin y Seerr van fuera, así que los Espectadores ven el contenido a toda velocidad.
+
+## Núcleo
+
+Toda Instancia ejecuta estos servicios:
+
+| Servicio | Función | Puerto | Tras la VPN |
 | --- | --- | --- | --- |
-| gluetun | VPN gateway (any provider gluetun supports) | — | — |
-| qBittorrent | Torrent client | 8080 | yes |
-| Prowlarr | Indexer manager | 9696 | yes |
-| FlareSolverr | Cloudflare solver for Prowlarr (`http://localhost:8191`) | — | yes |
-| Radarr | Movies | 7878 | yes |
-| Sonarr | Series | 8989 | yes |
-| Bazarr | Subtitles | 6767 | yes |
-| Jellyfin | Media server | 8096 | no |
-| Seerr | Request portal | 5055 | no |
+| gluetun | Pasarela VPN (cualquier proveedor que soporte gluetun) | — | — |
+| qBittorrent | Cliente de torrents | 8080 | sí |
+| Prowlarr | Gestor de indexers | 9696 | sí |
+| FlareSolverr | Resuelve Cloudflare para Prowlarr (`http://localhost:8191`) | — | sí |
+| Radarr | Películas | 7878 | sí |
+| Sonarr | Series | 8989 | sí |
+| Bazarr | Subtítulos | 6767 | sí |
+| Jellyfin | Servidor multimedia | 8096 | no |
+| Seerr | Portal de peticiones | 5055 | no |
 
-## Profiles
+## Perfiles
 
-Optional groups of services on top of the Core, turned on with `COMPOSE_PROFILES` in
-`.env` (comma separated). Setup for each: [docs/profiles.md](docs/profiles.md).
+Grupos opcionales de servicios sobre el Núcleo, que se activan con `COMPOSE_PROFILES` en
+`.env` (separados por comas). Configuración de cada uno: [docs/profiles.md](docs/profiles.md) (solo en inglés).
 
-| Profile | What it adds |
+| Perfil | Qué añade |
 | --- | --- |
-| `backup` | Nightly encrypted copy of the App data to Google Drive, with restore. See [docs/backup.md](docs/backup.md) ([español](docs/backup.es.md)). |
-| `vo` | A second Radarr and Sonarr for an original-version library. |
-| `jackett` | Jackett, as a Torznab bridge for indexers Prowlarr lacks. |
-| `seeding` | qui (qBittorrent web UI) and cleanuparr (download cleanup). |
-| `cleanup` | Maintainerr: removes library items by rules. |
-| `dashboard` | Homarr (start page) and Dockge (compose UI). |
-| `monitoring` | Beszel (metrics and alerts) and What's Up Docker (image updates). |
-| `proxy` | Nginx Proxy Manager, to publish only Jellyfin and Seerr on the internet. |
-| `remote` | Tailscale, with the LAN as an optional subnet route. |
-| `extras` | issue-automator (acts on Seerr issues), mousehole, a Tor proxy and File Browser. |
-| `transcode` | Tdarr server, for a Worker with a GPU to re-encode large files that are no longer seeding. See [docs/transcode.md](docs/transcode.md). |
+| `backup` | Copia cifrada cada noche de los Datos de las apps a Google Drive, con restauración. Ver [docs/backup.md](docs/backup.md). |
+| `vo` | Un segundo Radarr y Sonarr para una Biblioteca en versión original. |
+| `jackett` | Jackett, como puente Torznab para indexers que Prowlarr no tiene. |
+| `seeding` | qui (interfaz web de qBittorrent) y cleanuparr (limpieza de descargas). |
+| `cleanup` | Maintainerr: borra elementos de la Biblioteca según reglas. |
+| `dashboard` | Homarr (página de inicio) y Dockge (interfaz para compose). |
+| `monitoring` | Beszel (métricas y alertas) y What's Up Docker (actualizaciones de imágenes). |
+| `proxy` | Nginx Proxy Manager, para publicar Jellyfin y Seerr (y, con cuidado, algunas apps del Operador) en internet. Ver [docs/security.md](docs/security.md). |
+| `remote` | Tailscale, con la LAN como ruta de subred opcional. |
+| `extras` | issue-automator (actúa sobre las incidencias de Seerr), mousehole, un proxy Tor y File Browser. |
+| `transcode` | Servidor Tdarr, para que un Worker con GPU recodifique ficheros grandes que ya no se comparten. Ver [docs/transcode.md](docs/transcode.md) (solo en inglés). |
 
-Hardware transcoding with the host's GPU (`/dev/dri`) for Jellyfin and Tdarr is an
-override, `compose.gpu.yaml`, turned on with `COMPOSE_FILE` in `.env`.
+La transcodificación por hardware con la GPU del host (`/dev/dri`) para Jellyfin y Tdarr
+es un override, `compose.gpu.yaml`, que se activa con `COMPOSE_FILE` en `.env`.
 
-## Quickstart
+## Inicio rápido
 
-Requirements: Linux, Docker Engine with Compose 2.20 or newer, `/dev/net/tun`, and a VPN
-account.
+Requisitos: **Linux**, Docker Engine con Compose 2.20 o superior, `/dev/net/tun` y una
+cuenta de VPN. Windows y macOS no están soportados.
 
 ```sh
 git clone https://github.com/alberba/media-stack.git && cd media-stack
-scripts/setup.sh          # asks questions, writes .env, offers to run init.sh
-docker compose up -d
-scripts/verify.sh         # every service healthy, qBittorrent egress IP is the VPN's
+scripts/setup.sh && docker compose up -d && scripts/verify.sh
 ```
 
-`scripts/setup.sh` can be run again at any time: it offers the current `.env` values as
-defaults and keeps every setting it does not ask about. To skip it, copy `.env.example`
-to `.env`, fill it in and run `sudo scripts/init.sh` (checks the host and `.env`, creates
-folders and the network).
+## Guías
 
-`DATA_ROOT` holds both `torrents/` and `media/`, so Radarr and Sonarr import with
-hardlinks instead of copies. In qBittorrent, set the default save path to
-`/data/torrents`. App data lives under `APPDATA_ROOT`, outside this repo.
+1. [Instalación](docs/install.md): requisitos, el asistente, primer arranque y problemas frecuentes.
+2. [Conectar las apps](docs/wiring.md): lo que el contenedor `wire` conecta solo, lo que
+   queda a mano, la estructura de `/data` y los hardlinks.
+3. [Checklist de seguridad](docs/security.md): qué exponer, Access Lists y Tailscale.
+4. [Copia de seguridad y restauración](docs/backup.md). Solo en inglés:
+   [Perfiles](docs/profiles.md), [transcodificación](docs/transcode.md) y
+   [personalizaciones de Jellyfin](docs/jellyfin-customizations.md) (opcional).
 
-## Layout
+## Estructura
 
 ```
-compose.yaml            includes every stack
-compose.gpu.yaml        optional override: host GPU for Jellyfin and Tdarr
-stacks/<stack>/         one compose file per stack (Core or Profile)
-worker/                 Tdarr node for a Linux Worker, and the Windows node's config
-scripts/setup.sh        interactive wizard that writes .env
-scripts/init.sh         host checks + folders + network
-scripts/verify.sh       post-start health and VPN check
-docs/                   guides (Profiles, backup and restore, transcoding)
-.env.example            every setting, commented
+compose.yaml            incluye todos los stacks
+compose.gpu.yaml        override opcional: GPU del host para Jellyfin y Tdarr
+stacks/<stack>/         un compose por stack (Núcleo o Perfil)
+worker/                 nodo Tdarr para un Worker Linux, y la config del nodo Windows
+scripts/setup.sh        asistente interactivo que escribe .env
+scripts/init.sh         comprobaciones del host + carpetas + red
+scripts/verify.sh       comprobación de salud y de la VPN tras arrancar
+docs/                   guías (.md en español, .en.md en inglés)
+.env.example            todos los ajustes, comentados
 ```
 
-## Contributing
+## Contribuir
 
-Nothing specific to an Instance may be committed (see `docs/adr/0001`). The
-`.gitignore` is a whitelist, and gitleaks scans every commit and every push.
+No se puede subir nada propio de una Instancia (ver `docs/adr/0001`). El `.gitignore` es
+una lista blanca, y gitleaks revisa cada commit y cada push.
 
 ```sh
-git config core.hooksPath .githooks   # gitleaks pre-commit hook (gitleaks or Docker)
+git config core.hooksPath .githooks   # hook pre-commit de gitleaks (gitleaks o Docker)
 tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
-tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # need python3, and node or Docker
-tests/backup.test.sh && tests/backup-image.test.sh   # needs sqlite3 and Docker
+tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # necesitan python3, y node o Docker
+tests/backup.test.sh && tests/backup-image.test.sh   # necesitan sqlite3 y Docker
 ```
 
-Image versions are pinned; [Renovate](https://github.com/apps/renovate) opens PRs to bump
-them.
+Las versiones de las imágenes están fijadas; [Renovate](https://github.com/apps/renovate)
+abre PRs para subirlas.
 
-## License
+## Licencia
 
 MIT

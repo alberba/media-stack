@@ -13,6 +13,9 @@ services:
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/config:/config
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/cache:/cache
       - ${DATA_ROOT:?set DATA_ROOT in .env}/media:/data/media
+      # Only jellyfin-web's ui folder, which the image does not ship: the Wiring puts
+      # Abyss's Spotlight there when JELLYFIN_ABYSS is on. Empty otherwise.
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/ui:/jellyfin/jellyfin-web/ui:ro
     networks:
       - media
 

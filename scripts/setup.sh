@@ -51,6 +51,13 @@ PRESHARED_KEY_PROVIDERS="|airvpn|"
 # Providers whose port forwarding gluetun can request.
 PORT_FORWARDING_PROVIDERS="|perfect privacy|private internet access|privatevpn|protonvpn|"
 
+# Qualities the wizard offers for the Wiring's quality profile, best first (the names
+# stacks/wire/wire/quality.py knows), and the ones ticked by default.
+QUALITY_NAMES=("Remux-2160p" "Bluray-2160p" "WEB 2160p" "HDTV-2160p" "Remux-1080p" "Bluray-1080p"
+  "WEB 1080p" "HDTV-1080p" "Bluray-720p" "WEB 720p" "HDTV-720p" "Bluray-576p" "Bluray-480p"
+  "WEB 480p" "DVD" "SDTV" "Raw-HD" "BR-DISK")
+QUALITY_DEFAULTS="Remux-2160p,Bluray-2160p,WEB 2160p,HDTV-2160p,Remux-1080p,Bluray-1080p,WEB 1080p,HDTV-1080p,Bluray-720p,WEB 720p"
+
 WORK=""
 EXISTING=0
 
@@ -283,6 +290,11 @@ ask_profiles() {
   for profile in "${PROFILES[@]}"; do
     default=n
     if [[ "$current" == *",$profile,"* ]]; then default=y; fi
+    if [ "$profile" = vo ]; then
+      echo "  vo keeps dubbed and original-version copies as separate files, each with its own"
+      echo "  language rules: one Radarr/Sonarr cannot hold two copies of the same title. Only"
+      echo "  say yes if you want both; if you watch in one language, one manager is enough."
+    fi
     if confirm "  $profile: ${PROFILE_HELP[$profile]}?" "$default"; then
       chosen+="${chosen:+,}$profile"
       PROFILES_ON+="$profile,"
@@ -344,6 +356,102 @@ ask_profile_settings() {
   fi
 }
 
+# --- App connections (the Wiring) ------------------------------------------
+
+# Generates KEY unless it is set, or the app already has App data (then the Wiring
+# reads the key the app really uses from there).
+generate_key() {
+  local key="$1" file
+  file="$(get_env APPDATA_ROOT)/$2"
+  [ -z "$(get_env "$key")" ] || return 0
+  [ ! -e "$file" ] || return 0
+  set_env "$key" "$(random_hex 16)"
+}
+
+ask_qualities() {
+  echo "Qualities Radarr and Sonarr may download (higher in the list is preferred)."
+  echo "Remux and BR-DISK are full-size disc copies (40-80 GB per 4K film); 2160p needs 4K screens."
+  local current i n chosen="" on
+  current="$(get_env QUALITIES)"
+  [ -n "$current" ] || current="$QUALITY_DEFAULTS"
+  on=",$(printf '%s' "$current" | sed 's/ *, */,/g'),"
+  while true; do
+    for i in "${!QUALITY_NAMES[@]}"; do
+      if [[ "$on" == *",${QUALITY_NAMES[$i]},"* ]]; then n=x; else n=" "; fi
+      printf '  %2d [%s] %s\n' "$((i + 1))" "$n" "${QUALITY_NAMES[$i]}"
+    done
+    printf 'Numbers to tick or untick, separated by spaces (Enter = accept): '
+    read_answer ""
+    if [ -z "$ANSWER" ]; then
+      [ "$on" != "," ] && break
+      echo "  Tick at least one quality."
+      [ "$EOF_HIT" = 0 ] || die "input ended with no quality ticked."
+      continue
+    fi
+    for n in $ANSWER; do
+      if ! [[ "$n" =~ ^[0-9]+$ ]] || [ "$n" -lt 1 ] || [ "$n" -gt "${#QUALITY_NAMES[@]}" ]; then
+        echo "  '$n' is not in the list."
+        continue
+      fi
+      i="${QUALITY_NAMES[$((n - 1))]}"
+      if [[ "$on" == *",$i,"* ]]; then on="${on/,$i,/,}"; else on+="$i,"; fi
+    done
+    [ "$EOF_HIT" = 0 ] || break
+  done
+  for i in "${QUALITY_NAMES[@]}"; do
+    [[ "$on" != *",$i,"* ]] || chosen+="${chosen:+,}$i"
+  done
+  set_env QUALITIES "$chosen"
+}
+
+ask_app_connections() {
+  section "App connections"
+  echo "The wire container connects the apps on every start; nothing to copy by hand."
+  generate_key RADARR_API_KEY radarr/config.xml
+  generate_key SONARR_API_KEY sonarr/config.xml
+  generate_key PROWLARR_API_KEY prowlarr/config.xml
+  generate_key BAZARR_API_KEY bazarr/config/config.yaml
+  generate_key SEERR_API_KEY seerr/settings.json
+  if profile_chosen vo; then
+    generate_key RADARR_VO_API_KEY radarr-vo/config.xml
+    generate_key SONARR_VO_API_KEY sonarr-vo/config.xml
+  fi
+  if [ -z "$(get_env QBITTORRENT_PASSWORD)" ]; then
+    if [ -e "$(get_env APPDATA_ROOT)/qbittorrent/qBittorrent/qBittorrent.conf" ]; then
+      echo "qBittorrent is already set up: its password lets Radarr and Sonarr log in."
+      ask QBITTORRENT_PASSWORD "qBittorrent web UI password (optional)" "" "" secret
+    else
+      set_env QBITTORRENT_PASSWORD "$(random_hex 16)"
+      echo "  Generated qBittorrent login: $(get_env QBITTORRENT_USER) / $(get_env QBITTORRENT_PASSWORD)"
+    fi
+  fi
+  if [ -e "$(get_env APPDATA_ROOT)/jellyfin/config/data" ]; then
+    echo "Jellyfin is already set up: its admin login lets Seerr sign in (Enter skips)."
+    ask JELLYFIN_ADMIN_USER "Jellyfin admin user" "" '^[^[:space:]]+$'
+    ask JELLYFIN_ADMIN_PASSWORD "Jellyfin admin password" "" "" secret
+  else
+    echo "Jellyfin's admin account, created on its first start. It is also your Seerr login."
+    ask JELLYFIN_ADMIN_USER "Jellyfin admin user" "admin" '^[^[:space:]]+$'
+    ask_or_generate JELLYFIN_ADMIN_PASSWORD "Jellyfin admin password"
+  fi
+  ask_qualities
+}
+
+# Optional Jellyfin customizations (docs/jellyfin-customizations.md): the Wiring applies them.
+ask_jellyfin_extras() {
+  section "Jellyfin customizations (optional)"
+  local key label default
+  for key in JELLYFIN_ABYSS JELLYFIN_SEERR_REPORTER; do
+    case "$key" in
+      JELLYFIN_ABYSS) label="Apply the Abyss theme to Jellyfin (dark, Spotlight home banner)?" ;;
+      JELLYFIN_SEERR_REPORTER) label="Install SeerrReporter (Viewers report playback problems as Seerr issues)?" ;;
+    esac
+    default=n
+    [ "$(get_env "$key")" != on ] || default=y
+    if confirm "$label" "$default"; then set_env "$key" on; else set_env "$key" off; fi
+  done
+}
+
 ask_telegram() {
   section "Telegram notifications (optional)"
   echo "Alerts from backup, What's Up Docker and issue-automator. Enter skips."
@@ -395,6 +503,8 @@ main() {
   ask_profiles
   ask_gpu
   ask_profile_settings
+  ask_app_connections
+  ask_jellyfin_extras
   ask_telegram
   finish
   hand_off

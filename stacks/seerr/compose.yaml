@@ -10,6 +10,8 @@ services:
       TZ: ${TZ:?set TZ in .env}
       LOG_LEVEL: info
       PORT: "5055"
+      # Seerr's API key, so the Wiring and issue-automator know it without reading it.
+      API_KEY: ${SEERR_API_KEY:-}
     ports:
       - 5055:5055
     volumes:

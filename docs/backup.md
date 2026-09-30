@@ -1,155 +1,161 @@
-# Backup and restore
+# Copia de seguridad y restauración
 
-[Español](backup.es.md)
+[English](backup.en.md)
 
-The `backup` Profile keeps an encrypted, off-site copy of your Instance's App data, so
-that losing the machine loses nothing but the Media library, which the apps can
-download again from what the App data remembers.
+El Perfil `backup` guarda una copia cifrada y fuera de la máquina de los Datos de las
+apps de tu Instancia. Así, si pierdes la máquina solo pierdes la Biblioteca, que las
+apps pueden volver a descargar a partir de lo que recuerdan sus datos.
 
-- **What**: everything under `BACKUP_SOURCE` (default: `APPDATA_ROOT`). Each SQLite
-  database is copied with SQLite's online backup while the services keep running.
-  Left out, because it can be regenerated: caches, artwork and metadata, Jellyfin's
-  extracted subtitles, logs and the apps' own zip backups, plus whatever you add in
-  `BACKUP_EXCLUDE`.
-- **Where**: a [restic](https://restic.net) repository, encrypted with your password,
-  on Google Drive (the free 15 GB are plenty) through [rclone](https://rclone.org).
-- **When**: every night at 04:00 (`BACKUP_SCHEDULE`, in `TZ`). Keeps 7 daily, 4 weekly
-  and 6 monthly snapshots and prunes the rest.
-- **Alerts**: a Telegram message when a run fails, and the `backup` container turns
-  unhealthy until the next run succeeds.
+- **Qué**: todo lo que hay en `BACKUP_SOURCE` (por defecto, `APPDATA_ROOT`). Cada base
+  de datos SQLite se copia con el backup en caliente de SQLite, sin parar los
+  servicios. Se deja fuera lo que se puede regenerar: cachés, carátulas y metadatos,
+  los subtítulos extraídos por Jellyfin, logs y los zip de backup de las propias apps,
+  además de lo que añadas en `BACKUP_EXCLUDE`.
+- **Dónde**: un repositorio de [restic](https://restic.net), cifrado con tu contraseña,
+  en Google Drive (los 15 GB gratis sobran) a través de [rclone](https://rclone.org).
+- **Cuándo**: cada noche a las 04:00 (`BACKUP_SCHEDULE`, en tu `TZ`). Conserva 7
+  copias diarias, 4 semanales y 6 mensuales, y borra el resto.
+- **Avisos**: un mensaje de Telegram si una copia falla, y el contenedor `backup` pasa
+  a `unhealthy` hasta que la siguiente salga bien.
 
-## What to keep in your password manager
+## Qué guardar en el gestor de contraseñas
 
-Without the first two the backup cannot be read, and without the third you rebuild your
-settings by hand. Keep them in 1Password (or your password manager), not on the machine
-being backed up:
+Sin las dos primeras la copia no se puede leer, y sin la tercera tendrás que rehacer tu
+configuración a mano. Guárdalas en 1Password (o tu gestor de contraseñas), no en la
+máquina de la que haces copia:
 
-| Item | Where it lives on the Instance | What to store |
+| Elemento | Dónde está en la Instancia | Qué guardar |
 | --- | --- | --- |
-| Restic password | `RESTIC_PASSWORD` in `.env` | The password itself |
-| rclone config | `APPDATA_ROOT/backup/rclone.conf` | The whole file, as a document or attached file |
-| `.env` | The Template clone (not in the backup) | The whole file: VPN keys, paths, Profiles, Telegram |
+| Contraseña de restic | `RESTIC_PASSWORD` en `.env` | La contraseña |
+| Configuración de rclone | `APPDATA_ROOT/backup/rclone.conf` | El fichero entero, como documento o adjunto |
+| `.env` | El clon de la Plantilla (no está en la copia) | El fichero entero: claves de VPN, rutas, Perfiles, Telegram |
 
-In 1Password, one item per Instance works well: a Password item named
-"media-stack backup (<instance>)", the restic password in its password field, and
-`rclone.conf` and `.env` attached. Update the attachments whenever you run
-`rclone config` again or change `.env`.
+En 1Password funciona bien un elemento por Instancia: un elemento de tipo Contraseña
+llamado "media-stack backup (<instancia>)", la contraseña de restic en su campo de
+contraseña, y `rclone.conf` y `.env` adjuntos. Actualiza los adjuntos cada vez que
+vuelvas a ejecutar `rclone config` o cambies `.env`.
 
-## Setup
+## Puesta en marcha
 
-### 1. Turn the Profile on
+### 1. Activa el Perfil
 
-In `.env`:
+En `.env`:
 
 ```sh
-COMPOSE_PROFILES=backup          # or e.g. "vo,backup"
-RESTIC_PASSWORD=...              # generate one: openssl rand -base64 32
-TELEGRAM_BOT_TOKEN=...           # optional: reuse the bot you already have for alerts
+COMPOSE_PROFILES=backup          # o por ejemplo "vo,backup"
+RESTIC_PASSWORD=...              # genera una: openssl rand -base64 32
+TELEGRAM_BOT_TOKEN=...           # opcional: reutiliza el bot que ya uses para avisos
 TELEGRAM_CHAT_ID=...
 ```
 
-Then run `sudo scripts/init.sh` again: it checks the password and creates
+Después vuelve a ejecutar `sudo scripts/init.sh`: comprueba la contraseña y crea
 `APPDATA_ROOT/backup`.
 
-### 2. Connect Google Drive
+### 2. Conecta Google Drive
 
-Google asks for a browser login once, so this is done in two places.
+Google pide iniciar sesión en un navegador una vez, así que se hace en dos sitios.
 
-1. Build the image: `docker compose build backup`
-2. Start rclone's setup inside it:
+1. Construye la imagen: `docker compose build backup`
+2. Abre la configuración de rclone dentro de ella:
    `docker compose run --rm backup rclone config`
-   - `n` (new remote), name it `gdrive` (it must match `RESTIC_REPOSITORY`)
-   - Storage: `drive`
-   - `client_id` / `client_secret`: leave empty to use rclone's, or
-     [create your own](https://rclone.org/drive/#making-your-own-client-id) for better
-     limits. With your own, set the Google app's publishing status to **In production**:
-     in "Testing" Google revokes the token after 7 days and backups stop.
-   - Scope: `drive.file` (rclone only sees the files it creates)
-   - Leave the rest empty; `Use web browser to automatically authenticate?` → `n`
-3. rclone prints a command like `rclone authorize "drive" "..."`. Run it on any
-   computer with a browser and rclone installed, log in to Google, and paste the token
-   it prints back into the prompt.
-4. Finish with `n` (not a shared drive), `y`, `q`. The file is now in
-   `APPDATA_ROOT/backup/rclone.conf`. **Save it and the password in 1Password now.**
+   - `n` (nuevo remoto), llámalo `gdrive` (tiene que coincidir con `RESTIC_REPOSITORY`)
+   - Almacenamiento: `drive`
+   - `client_id` / `client_secret`: déjalos vacíos para usar los de rclone, o
+     [crea los tuyos](https://rclone.org/drive/#making-your-own-client-id) para tener
+     mejores límites. Si usas los tuyos, pon el estado de publicación de la app de
+     Google en **En producción**: en "Prueba" Google revoca el token a los 7 días y
+     las copias dejan de funcionar.
+   - Scope: `drive.file` (rclone solo ve los ficheros que crea él)
+   - Deja el resto vacío; a `Use web browser to automatically authenticate?` → `n`
+3. rclone muestra un comando como `rclone authorize "drive" "..."`. Ejecútalo en
+   cualquier ordenador con navegador y rclone instalado, inicia sesión en Google y pega
+   en el prompt el token que imprime.
+4. Termina con `n` (no es una unidad compartida), `y`, `q`. El fichero queda en
+   `APPDATA_ROOT/backup/rclone.conf`. **Guárdalo junto con la contraseña en 1Password
+   ahora.**
 
-### 3. Start it and run the first backup
+### 3. Arráncalo y haz la primera copia
 
 ```sh
 docker compose up -d backup
-docker compose exec backup media-backup run      # first run: creates the repository
-docker compose exec backup restic snapshots      # the snapshot is there
+docker compose exec backup media-backup run      # la primera vez crea el repositorio
+docker compose exec backup restic snapshots      # ahí está la copia
 ```
 
-The first run uploads everything; later runs only send what changed. The container
-mounts the App data read-write, because SQLite needs its lock files to copy a database
-in use (and restores write there), but a backup run writes nothing else to it.
+La primera copia lo sube todo; las siguientes solo envían lo que ha cambiado. El
+contenedor monta los Datos de las apps en lectura-escritura, porque SQLite necesita sus
+ficheros de bloqueo para copiar una base de datos en uso (y la restauración escribe
+ahí), pero una copia no escribe nada más.
 
-### Backing up App data that is not in the Template layout yet
+### Copiar datos que aún no siguen la estructura de la Plantilla
 
-If your services still keep their data somewhere else (for example before moving an
-existing Instance to the Template), point the Profile there. It only needs the folder
-that holds every service's configuration and databases:
+Si tus servicios todavía guardan sus datos en otro sitio (por ejemplo, antes de pasar
+una Instancia existente a la Plantilla), apunta el Perfil ahí. Solo necesita la carpeta
+que contiene la configuración y las bases de datos de todos los servicios:
 
 ```sh
-BACKUP_SOURCE=/path/to/your/old/stack
-BACKUP_EXCLUDE=.git,some/big/folder     # anything else you do not need back
+BACKUP_SOURCE=/ruta/a/tu/stack/antiguo
+BACKUP_EXCLUDE=.git,alguna/carpeta/grande     # lo que no necesites recuperar
 ```
 
-Only the `backup` service has to run: `docker compose up -d --build backup`. The Core
-variables in `.env` still need values, because Compose reads the whole file.
+Solo hace falta el servicio `backup`: `docker compose up -d --build backup`. Las
+variables del Núcleo en `.env` tienen que tener valor igualmente, porque Compose lee el
+fichero entero.
 
-## Checking it
+## Comprobarlo
 
-- `docker compose ps backup`: `healthy` unless the last run failed. Telegram only hears
-  about runs that fail; if the container is stopped nothing runs and nothing is sent, so
-  let your monitoring watch its health too.
-- `docker compose logs backup`: the output of every run.
-- `docker compose exec backup restic snapshots`: every snapshot kept.
-- `docker compose exec backup media-backup summary /source`: movies, series, indexers
-  and Jellyfin users in your live App data. Note it down before a restore drill.
+- `docker compose ps backup`: `healthy` salvo que la última copia fallara. Telegram solo
+  se entera de las copias que fallan; si el contenedor está parado no se ejecuta nada y
+  no llega ningún aviso, así que vigila también su estado con tu monitorización.
+- `docker compose logs backup`: la salida de cada copia.
+- `docker compose exec backup restic snapshots`: todas las copias conservadas.
+- `docker compose exec backup media-backup summary /source`: películas, series,
+  indexers y usuarios de Jellyfin en tus datos actuales. Apúntalo antes de un simulacro
+  de restauración.
 
-## Restore
+## Restaurar
 
-Use this to recover a lost machine, and once in a while as a drill on a spare VM, so
-you know it works before you need it.
+Sirve para recuperar una máquina perdida y, de vez en cuando, como simulacro en una VM
+de pruebas, para saber que funciona antes de necesitarlo.
 
-1. On the new machine, install Docker, clone the Template and fill in `.env` with the
-   **same** `RESTIC_PASSWORD`, `RESTIC_REPOSITORY` and `BACKUP_HOST`, plus
-   `COMPOSE_PROFILES=backup` (add the rest of your Profiles too).
+1. En la máquina nueva, instala Docker, clona la Plantilla y rellena `.env` con los
+   **mismos** `RESTIC_PASSWORD`, `RESTIC_REPOSITORY` y `BACKUP_HOST`, además de
+   `COMPOSE_PROFILES=backup` (y el resto de tus Perfiles).
 2. `sudo scripts/init.sh`
-3. Put `rclone.conf` from 1Password in `APPDATA_ROOT/backup/rclone.conf`
-   (`chmod 600` it).
-4. See what is there:
+3. Copia `rclone.conf` desde 1Password a `APPDATA_ROOT/backup/rclone.conf`
+   (con `chmod 600`).
+4. Mira qué copias hay:
    ```sh
    docker compose build backup
    docker compose run --rm backup restic snapshots
    ```
-5. If you restore over App data that services were using (same machine), stop them
-   first: `docker compose down`. Then restore the latest snapshot into the App data
-   folder (or add a snapshot ID after
-   `/source` to pick another):
+5. Si restauras sobre datos que los servicios estaban usando (misma máquina), páralos
+   antes: `docker compose down`. Después restaura la última copia en la carpeta de datos (o añade un ID de copia después de
+   `/source` para elegir otra):
    ```sh
    docker compose run --rm backup restore /source
    ```
-   Files and databases come back with their original owners, and any `-wal`/`-shm`
-   left next to a restored database is removed. The command ends with the
-   summary of what it restored: compare it with the one you noted.
-6. Start the Instance and check it:
+   Ficheros y bases de datos vuelven con sus dueños originales, y se borra cualquier
+   `-wal`/`-shm` que quedara junto a una base de datos restaurada. El comando termina con
+   el resumen de lo restaurado: compáralo con el que apuntaste.
+6. Arranca la Instancia y compruébala:
    ```sh
    docker compose up -d
    scripts/verify.sh
    ```
-   Then in the web UIs: Radarr and Sonarr list your library, Prowlarr's indexers pass
-   **Test All**, and every Jellyfin user can log in.
+   Después, en las interfaces web: Radarr y Sonarr muestran tu biblioteca, los
+   indexers de Prowlarr pasan **Test All** y todos los usuarios de Jellyfin pueden
+   iniciar sesión.
 
-The Media library is not in the backup: Radarr and Sonarr show the files as missing
-until they are downloaded again (**Search All Missing**).
+La Biblioteca no está en la copia: Radarr y Sonarr marcan los ficheros como ausentes
+hasta que se vuelvan a descargar (**Search All Missing**).
 
-**If `PUID`/`PGID` changed** on the new machine, give the restored folders to the new
-owner: `sudo chown -R PUID:PGID APPDATA_ROOT/<service>` (Seerr stays `1000:1000`).
+**Si `PUID`/`PGID` cambian** en la máquina nueva, da las carpetas restauradas al nuevo
+dueño: `sudo chown -R PUID:PGID APPDATA_ROOT/<servicio>` (Seerr sigue en `1000:1000`).
 
-**Restoring an old layout** (backed up with a custom `BACKUP_SOURCE`): restore into an
-empty folder instead, then move each service's folder to `APPDATA_ROOT/<service>`:
+**Restaurar una estructura antigua** (copiada con un `BACKUP_SOURCE` propio): restaura
+en una carpeta vacía y después mueve la carpeta de cada servicio a
+`APPDATA_ROOT/<servicio>`:
 
 ```sh
 mkdir /tmp/restore

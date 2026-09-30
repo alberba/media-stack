@@ -15,7 +15,7 @@ place. Stop its containers with `docker compose --profile <name> down <service>.
 
 | Profile | Services | Ports | Guide |
 | --- | --- | --- | --- |
-| `backup` | backup | — | [backup.md](backup.md) |
+| `backup` | backup | — | [backup.md](backup.en.md) |
 | `vo` | radarr-vo, sonarr-vo (behind the VPN) | 7879, 8990 | [below](#vo) |
 | `jackett` | jackett (behind the VPN) | 9117 | [below](#jackett) |
 | `seeding` | qui, cleanuparr | 7476, 11011 | [below](#seeding) |
@@ -36,12 +36,12 @@ Prowlarr, at `http://localhost:<port>`.
 A second Radarr and Sonarr for an original-version library, next to the Core ones. They
 use the same `DATA_ROOT`, so imports are still hardlinks.
 
-1. In each, add a root folder of its own: `/data/media/movies-vo` and `/data/media/tv-vo`.
-2. In qBittorrent, give them their own categories (e.g. `radarr-vo`, `tv-vo`) so each
-   manager only imports its own downloads.
-3. In Prowlarr > Settings > Apps, add them at `http://localhost:7879` and
-   `http://localhost:8990`. In Bazarr, add them as extra Radarr/Sonarr servers.
-4. In Seerr > Settings > Services, add them as a second Radarr and Sonarr server.
+The Wiring connects them like the Core ones ([wiring](wiring.en.md)): root folders
+`/data/media/movies-vo` and `/data/media/tv-vo`, qBittorrent categories `movies-vo` and
+`tv-vo` (so each manager only imports its own downloads), Prowlarr apps at
+`http://localhost:7879` and `http://localhost:8990`, the same Jellyfin libraries, and a
+second, non-default Radarr and Sonarr server in Seerr. Their quality profile prefers the
+original language. Bazarr only talks to one Radarr and one Sonarr, so it keeps the Core ones.
 
 ## jackett
 
@@ -102,10 +102,11 @@ these UIs off the internet (see [proxy](#proxy)).
 
 ## proxy
 
-Nginx Proxy Manager is the Instance's HTTPS entry point from the internet. **Publish only
-Jellyfin and Seerr**: they are made for Viewers, have their own logins and are built to
-face the internet. Everything else (the *arr apps, qBittorrent, the dashboards, NPM's
-own admin UI) is for the Operator and stays on the LAN or behind the `remote` Profile.
+Nginx Proxy Manager is the Instance's HTTPS entry point from the internet. Publish
+Jellyfin and Seerr: they are made for Viewers, have their own logins and are built to
+face the internet. The Operator apps are safer on the LAN or behind the `remote` Profile;
+if you publish Radarr, Sonarr, Bazarr or Homarr, follow the
+[security checklist](security.en.md#publishing-operator-apps-radarr-sonarr-bazarr-homarr).
 
 1. Forward ports 80 and 443 (never 81) from your router to the Instance, and point two
    DNS names at your public IP, e.g. `watch.example.com` and `request.example.com`.
@@ -152,11 +153,14 @@ Small services the author's Instance uses, turned on together.
   blocklists the release in Radarr/Sonarr and searches for another (video and audio
   issues), asks Bazarr for subtitles (subtitle issues), comments on the issue and sends a
   Telegram message. Its messages are in Spanish.
-  1. Set `SEERR_API_KEY`, `RADARR_API_KEY` and `SONARR_API_KEY` (each app's Settings >
-     General), and optionally `BAZARR_API_KEY` and the Telegram variables.
-  2. With the `vo` Profile, also set `RADARR_VO_API_KEY`/`SONARR_VO_API_KEY`, and
+  1. It uses `SEERR_API_KEY`, `RADARR_API_KEY`, `SONARR_API_KEY` and `BAZARR_API_KEY`,
+     which `scripts/setup.sh` generates for a new Instance. On an Instance set up before
+     the Wiring, copy them from each app's Settings > General. Optionally set the Telegram
+     variables.
+  2. With the `vo` Profile, it also uses `RADARR_VO_API_KEY`/`SONARR_VO_API_KEY`; set
      `SEERR_RADARR_VO_SERVER_ID`/`SEERR_SONARR_VO_SERVER_ID` to the id Seerr gives the VO
-     servers (the first server in Seerr > Settings > Services is 0, the next 1).
+     servers (the first server in Seerr > Settings > Services is 0, the next 1: with the
+     Wiring, 1 for both).
   3. In Seerr > Settings > Notifications > Webhook: URL
      `http://issue-automator:5056/webhook`, notification type **Issue Reported**, and
      the default JSON payload.

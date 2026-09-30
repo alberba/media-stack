@@ -49,6 +49,16 @@
         "(?<depName>zricethezav/gitleaks):(?<currentValue>v[\\d.]+)"
       ],
       "datasourceTemplate": "docker"
+    },
+    {
+      "description": "Abyss theme for Jellyfin, pinned in the Wiring (stacks/wire/wire/extras.py)",
+      "customType": "regex",
+      "managerFilePatterns": [
+        "/^stacks/wire/wire/extras\\.py$/"
+      ],
+      "matchStrings": [
+        "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\w+ = \"(?<currentValue>[^\"]+)\""
+      ]
     }
   ]
 }

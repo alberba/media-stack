@@ -12,6 +12,8 @@ services:
     depends_on:
       gluetun:
         condition: service_healthy
+      wire-seed:
+        condition: service_completed_successfully
     environment:
       PUID: ${PUID:?set PUID in .env}
       PGID: ${PGID:?set PGID in .env}
@@ -37,6 +39,8 @@ services:
     depends_on:
       gluetun:
         condition: service_healthy
+      wire-seed:
+        condition: service_completed_successfully
     environment:
       PUID: ${PUID:?set PUID in .env}
       PGID: ${PGID:?set PGID in .env}

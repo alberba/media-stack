@@ -14,7 +14,7 @@ REQUIRED_VARS=(APPDATA_ROOT DATA_ROOT PUID PGID TZ VPN_SERVICE_PROVIDER VPN_TYPE
 DEFAULT_NETWORK="media-network"
 
 # Folders under APPDATA_ROOT owned by PUID:PGID.
-APPDATA_DIRS=(gluetun qbittorrent prowlarr radarr sonarr bazarr jellyfin/config jellyfin/cache)
+APPDATA_DIRS=(gluetun qbittorrent prowlarr radarr sonarr bazarr jellyfin/config jellyfin/cache jellyfin/ui wire)
 # Seerr runs as the image's fixed `node` user.
 SEERR_OWNER="1000:1000"
 # Folders under APPDATA_ROOT for each Profile, owned by PUID:PGID. Created only when

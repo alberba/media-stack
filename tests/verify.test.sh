@@ -10,13 +10,14 @@ VERIFY="$REPO/scripts/verify.sh"
 setup() {
   SANDBOX="$(mktemp -d)"
   mkdir -p "$SANDBOX/bin"
-  export FAKE_UNHEALTHY="" FAKE_MISSING="" FAKE_HOST_IP="203.0.113.10" FAKE_VPN_IP="198.51.100.20"
+  export FAKE_UNHEALTHY="" FAKE_MISSING="" FAKE_HOST_IP="203.0.113.10" FAKE_VPN_IP="198.51.100.20" FAKE_WIRE="exited 0"
   cat > "$SANDBOX/bin/docker" <<'FAKE'
 #!/usr/bin/env bash
 case "$1" in
   inspect)
     name="${*: -1}"
     [ "$name" = "$FAKE_MISSING" ] && { echo "Error: No such object: $name" >&2; exit 1; }
+    [ "$name" = wire ] && { echo "$FAKE_WIRE"; exit 0; }
     if [ "$name" = "$FAKE_UNHEALTHY" ]; then echo unhealthy; else echo healthy; fi ;;
   exec) echo "$FAKE_VPN_IP" ;;
 esac
@@ -48,6 +49,24 @@ test_fails_when_a_service_is_missing() {
   FAKE_MISSING=seerr run_verify
   assert_status 1
   assert_output_contains "seerr"
+}
+
+test_fails_when_the_wiring_failed() {
+  FAKE_WIRE="exited 1" run_verify
+  assert_status 1
+  assert_output_contains "docker compose logs wire"
+}
+
+test_fails_while_the_wiring_is_still_running() {
+  FAKE_WIRE="running 0" run_verify
+  assert_status 1
+  assert_output_contains "still connecting"
+}
+
+test_fails_when_the_wiring_never_ran() {
+  FAKE_MISSING=wire run_verify
+  assert_status 1
+  assert_output_contains "wire never ran"
 }
 
 test_fails_when_qbittorrent_leaks_the_host_ip() {
