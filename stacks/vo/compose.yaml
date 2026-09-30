@@ -4,7 +4,7 @@
 # /data/media/movies-vo and /data/media/tv-vo, and their own qBittorrent categories.
 services:
   radarr-vo:
-    image: lscr.io/linuxserver/radarr:6.3.0.10514-ls315
+    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls318
     container_name: radarr-vo
     profiles: [vo]
     restart: unless-stopped
