@@ -437,6 +437,21 @@ ask_app_connections() {
   ask_qualities
 }
 
+# Optional Jellyfin customizations (docs/jellyfin-customizations.md): the Wiring applies them.
+ask_jellyfin_extras() {
+  section "Jellyfin customizations (optional)"
+  local key label default
+  for key in JELLYFIN_ABYSS JELLYFIN_SEERR_REPORTER; do
+    case "$key" in
+      JELLYFIN_ABYSS) label="Apply the Abyss theme to Jellyfin (dark, Spotlight home banner)?" ;;
+      JELLYFIN_SEERR_REPORTER) label="Install SeerrReporter (Viewers report playback problems as Seerr issues)?" ;;
+    esac
+    default=n
+    [ "$(get_env "$key")" != on ] || default=y
+    if confirm "$label" "$default"; then set_env "$key" on; else set_env "$key" off; fi
+  done
+}
+
 ask_telegram() {
   section "Telegram notifications (optional)"
   echo "Alerts from backup, What's Up Docker and issue-automator. Enter skips."
@@ -489,6 +504,7 @@ main() {
   ask_gpu
   ask_profile_settings
   ask_app_connections
+  ask_jellyfin_extras
   ask_telegram
   finish
   hand_off

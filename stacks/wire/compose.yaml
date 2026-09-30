@@ -27,6 +27,8 @@ x-wire: &wire
     JELLYFIN_ADMIN_USER: ${JELLYFIN_ADMIN_USER:-}
     JELLYFIN_ADMIN_PASSWORD: ${JELLYFIN_ADMIN_PASSWORD:-}
     QUALITIES: ${QUALITIES:-}
+    JELLYFIN_ABYSS: ${JELLYFIN_ABYSS:-off}
+    JELLYFIN_SEERR_REPORTER: ${JELLYFIN_SEERR_REPORTER:-off}
 
 services:
   wire-seed:
@@ -47,6 +49,8 @@ services:
       # config and cache in APPDATA_ROOT/wire.
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}:/appdata:ro
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/wire:/config
+      # Abyss's Spotlight files, served by Jellyfin as jellyfin-web/ui (#11).
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jellyfin/ui:/jellyfin-ui
     networks:
       - media
 

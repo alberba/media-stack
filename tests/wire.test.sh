@@ -18,7 +18,7 @@ import unittest
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from wire import config, quality, seed, steps
+from wire import config, extras, quality, seed, steps
 from wire.api import Client
 
 
@@ -440,6 +440,136 @@ class Quality(Case):
 
     def test_every_offered_quality_has_a_name(self):
         self.assertEqual(len(quality.NAMES), len(set(quality.NAMES)))
+
+
+class JellyfinExtras(Case):
+    """Jellyfin with its setup done, one admin and one Viewer, and no plugins yet.
+    Installed plugins show up as Active only after a restart, like the real one."""
+
+    def setUp(self):
+        super().setUp()
+        self.jf = self.app(values={
+            "/System/Info/Public": {"StartupWizardCompleted": True},
+            "/Users": [{"Id": "u1", "Name": "ana"}, {"Id": "u2", "Name": "viewer"}],
+        })
+        self.state = {"css": "body { color: red; }\n", "repos": [], "plugins": [], "pending": [],
+                      "prefs": {}, "conf": {}, "restarts": 0}
+        st, h = self.state, self.jf.handlers
+        h[("POST", "/Users/AuthenticateByName")] = lambda b: (200, {"AccessToken": "tok"})
+        h[("GET", "/System/Configuration/branding")] = lambda b: (200, {"CustomCss": st["css"], "SplashscreenEnabled": False})
+        h[("POST", "/System/Configuration/branding")] = lambda b: (st.update(css=b["CustomCss"]), (204, None))[1]
+        h[("GET", "/Repositories")] = lambda b: (200, list(st["repos"]))
+        h[("POST", "/Repositories")] = lambda b: (st.update(repos=b), (204, None))[1]
+        h[("GET", "/Plugins")] = lambda b: (200, [{"Id": g.replace("-", ""), "Status": "Active"} for g in st["plugins"]]
+                                                 + [{"Id": g.replace("-", ""), "Status": "Restart"} for g in st["pending"]])
+        h[("POST", "/System/Restart")] = lambda b: (self.restart(), (204, None))[1]
+        for _, guid, _ in (extras.FILE_TRANSFORMATION, extras.JS_INJECTOR, extras.SEERR_REPORTER):
+            path = f"/Plugins/{guid}/Configuration"
+            h[("GET", path)] = lambda b, g=guid: (200, dict(st["conf"].get(g, {})))
+            h[("POST", path)] = lambda b, g=guid: (st["conf"].update({g: b}), (204, None))[1]
+        extras.time.sleep = lambda s: None
+        self.ui = os.path.join(self.appdata, "jellyfin", "ui")
+        self.fetched = []
+
+    def restart(self):
+        self.state["restarts"] += 1
+        self.state["plugins"] += self.state.pop("pending")
+        self.state["pending"] = []
+
+    def answer_install(self):
+        for method, path, query, body, _ in self.jf.calls:
+            if method == "POST" and path.startswith("/Packages/Installed/") and query["assemblyGuid"] not in self.state["pending"] + self.state["plugins"]:
+                self.state["pending"].append(query["assemblyGuid"])
+
+    def run_extras(self, **env):
+        orig = self.jf.answer
+
+        def answer(method, path, body):
+            status = orig(method, path, body)
+            self.answer_install()
+            return status
+        self.jf.answer = answer
+        return extras.customize(self.jf.url, self.cfg(**env), self.ui,
+                                fetch=lambda url: (self.fetched.append(url), b"x")[1], wait=lambda: None)
+
+    def prefs_handlers(self):
+        st, h = self.state, self.jf.handlers
+        h[("GET", "/DisplayPreferences/usersettings")] = lambda b: (200, {})
+        orig = self.jf.answer
+
+        def answer(method, path, body):
+            if path == "/DisplayPreferences/usersettings":
+                user = [c for c in self.jf.calls if c[1] == path][-1][2]["userId"]
+                if method == "GET":
+                    return 200, json.loads(json.dumps(st["prefs"].get(user, {"CustomPrefs": {}})))
+                st["prefs"][user] = body
+                return 204, None
+            return orig(method, path, body)
+        self.jf.answer = answer
+
+    def test_nothing_chosen_does_nothing(self):
+        self.assertEqual(self.run_extras(), ["jellyfin: no customizations chosen in .env"])
+        self.assertEqual(self.jf.posts(), [])
+
+    def test_abyss_from_scratch(self):
+        self.prefs_handlers()
+        log = self.run_extras(JELLYFIN_ABYSS="on")
+        st = self.state
+        self.assertTrue(st["css"].startswith(extras.CSS_START + "\n@import url('https://cdn.jsdelivr.net/gh/AumGupta/abyss-jellyfin@"
+                                             + extras.ABYSS_VERSION + "/abyss.css');"))
+        self.assertIn("body { color: red; }", st["css"])
+        self.assertEqual({r["Url"] for r in st["repos"]}, {extras.FILE_TRANSFORMATION[2], extras.JS_INJECTOR[2]})
+        self.assertEqual(st["restarts"], 1)
+        for user in ("u1", "u2"):
+            custom = st["prefs"][user]["CustomPrefs"]
+            self.assertEqual((custom["appTheme"], custom["homesection0"], custom["homesection4"]), ("dark", "resume", "none"))
+        scripts = st["conf"][extras.JS_INJECTOR[1]]["CustomJavaScripts"]
+        self.assertEqual([s["Name"] for s in scripts], [extras.LOADER_NAME])
+        self.assertEqual(sorted(os.listdir(self.ui)), sorted(extras.SPOTLIGHT_FILES + [".version"]))
+        self.assertTrue(all("@" + extras.ABYSS_VERSION + "/" in u for u in self.fetched))
+        self.assertIn("jellyfin: restarted to load the new plugins", log)
+
+    def test_a_second_run_changes_nothing(self):
+        self.prefs_handlers()
+        self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_SEERR_REPORTER="on")
+        changes = lambda: [c for c in self.jf.posts() if c[1] != "/Users/AuthenticateByName"]
+        before = len(changes())
+        self.fetched.clear()
+        self.assertEqual(self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_SEERR_REPORTER="on"), [])
+        self.assertEqual(len(changes()), before)
+        self.assertEqual(self.fetched, [])
+
+    def test_a_viewer_who_changed_their_home_is_left_alone(self):
+        self.prefs_handlers()
+        self.state["prefs"]["u2"] = {"CustomPrefs": {"abyssApplied": "true", "homesection0": "latestmedia"}}
+        self.run_extras(JELLYFIN_ABYSS="on")
+        self.assertEqual(self.state["prefs"]["u2"]["CustomPrefs"]["homesection0"], "latestmedia")
+
+    def test_an_older_abyss_block_follows_the_pinned_version(self):
+        self.state["css"] = extras.CSS_START + "\n@import url('old');\n" + extras.CSS_END + "\nbody {}"
+        self.assertEqual(extras.abyss_css(self.state["css"]).count(extras.CSS_START), 1)
+        self.assertIn(extras.ABYSS_VERSION, extras.abyss_css(self.state["css"]))
+        self.assertTrue(extras.abyss_css(self.state["css"]).endswith("\nbody {}"))
+
+    def test_seerr_reporter_gets_seerr_and_its_key(self):
+        log = self.run_extras(JELLYFIN_SEERR_REPORTER="on")
+        conf = self.state["conf"][extras.SEERR_REPORTER[1]]
+        self.assertEqual((conf["SeerrUrl"], conf["ApiKey"]), ("http://seerr:5055", "e" * 32))
+        self.assertEqual({r["Url"] for r in self.state["repos"]}, {extras.FILE_TRANSFORMATION[2], extras.SEERR_REPORTER[2]})
+        self.assertNotIn("/System/Configuration/branding", [c[1] for c in self.jf.posts()])
+        self.assertIn("jellyfin: Seerr Reporter pointed at Seerr", log)
+
+    def test_a_configured_seerr_reporter_keeps_its_key(self):
+        self.state["plugins"] = [extras.FILE_TRANSFORMATION[1], extras.SEERR_REPORTER[1]]
+        self.state["repos"] = [{"Url": extras.FILE_TRANSFORMATION[2]}, {"Url": extras.SEERR_REPORTER[2]}]
+        self.state["conf"][extras.SEERR_REPORTER[1]] = {"SeerrUrl": "http://other:5055", "ApiKey": "mine"}
+        self.assertEqual(self.run_extras(JELLYFIN_SEERR_REPORTER="on"), [])
+        self.assertEqual(self.state["restarts"], 0)
+
+    def test_skipped_without_an_admin_login(self):
+        log = self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_ADMIN_PASSWORD="")
+        self.assertIn("WARN", log[0])
+        self.assertEqual(self.jf.posts(), [])
 
 
 if __name__ == "__main__":
