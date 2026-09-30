@@ -10,13 +10,14 @@ import os
 import subprocess
 import sys
 
-from . import config, quality, steps
+from . import config, extras, quality, steps
 from .api import Client
 from .seed import Seeder
 
 APPDATA = os.environ.get("WIRE_APPDATA", "/appdata")
 DATA = os.environ.get("WIRE_DATA", "/data")
 RECYCLARR_DIR = os.environ.get("RECYCLARR_CONFIG_DIR", "/config")
+UI_FOLDER = os.environ.get("WIRE_JELLYFIN_UI", "/jellyfin-ui")
 WAIT = int(os.environ.get("WIRE_WAIT_SECONDS", "900"))
 
 
@@ -78,6 +79,10 @@ def wire():
     run("quality", lambda: recyclarr(cfg, arr_clients), failures)
     # Last: Seerr picks the quality profile the step above created.
     run("seerr", lambda: steps.seerr(seerr, cfg, arr_clients), failures)
+    # After Seerr: SeerrReporter uses its API key, and a restart for new plugins should
+    # not cut the other steps off.
+    run("jellyfin-extras", lambda: extras.customize(
+        "http://jellyfin:8096", cfg, UI_FOLDER, wait=lambda: jellyfin.wait("/System/Info/Public", WAIT)), failures)
     if failures:
         print(f"FAIL wiring incomplete: {', '.join(failures)}. Fix it and run `docker compose up wire` again.", flush=True)
         return 1

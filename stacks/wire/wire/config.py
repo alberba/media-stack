@@ -78,6 +78,10 @@ def get(environ, name):
     return (environ.get(name) or "").strip()
 
 
+def on(environ, name):
+    return get(environ, name).lower() in ("on", "true", "yes", "1")
+
+
 def arr_key(environ, appdata, key, env_name):
     return arr_key_in(appdata, key) or get(environ, f"{env_name}_API_KEY")
 
@@ -95,5 +99,7 @@ def load(environ, appdata="/appdata"):
         "qbittorrent_password": get(environ, "QBITTORRENT_PASSWORD"),
         "jellyfin_user": get(environ, "JELLYFIN_ADMIN_USER"),
         "jellyfin_password": get(environ, "JELLYFIN_ADMIN_PASSWORD"),
+        "jellyfin_abyss": on(environ, "JELLYFIN_ABYSS"),
+        "jellyfin_seerr_reporter": on(environ, "JELLYFIN_SEERR_REPORTER"),
         "qualities": [q.strip() for q in get(environ, "QUALITIES").split(",") if q.strip()],
     }
