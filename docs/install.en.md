@@ -2,7 +2,7 @@
 
 [Español](install.md)
 
-From an empty Linux machine to a running Instance. Next: [wire the apps](wiring.en.md)
+From an empty Linux machine to a running Instance, with the apps already wired to each other. Next: [what is left to you](wiring.en.md#what-is-left-to-you)
 and read the [security checklist](security.en.md) before exposing anything.
 
 ## Requirements
@@ -26,12 +26,14 @@ scripts/verify.sh         # every service healthy, qBittorrent egress IP is the 
 ```
 
 1. **`scripts/setup.sh`** asks for the paths, `PUID`/`PGID` (`id -u`, `id -g`), time zone,
-   VPN provider and credentials, and which Profiles to turn on. It writes `.env` and
+   VPN provider and credentials, which Profiles to turn on, the Jellyfin admin and the
+   qualities to download, and generates the apps' API keys. It writes `.env` and
    offers to run `sudo scripts/init.sh`, which checks the host, creates the folders
    under `DATA_ROOT` and `APPDATA_ROOT` and the Docker network. Run it again at any time:
    it offers the current values as defaults and keeps what it does not ask about.
-2. **`docker compose up -d`** starts the Core and the Profiles in `COMPOSE_PROFILES`.
-3. **`scripts/verify.sh`** checks, a minute or two after starting, that every Core service is healthy and that
+2. **`docker compose up -d`** starts the Core and the Profiles in `COMPOSE_PROFILES`, and
+   the `wire` container [wires the apps](wiring.en.md) to each other.
+3. **`scripts/verify.sh`** checks, a minute or two after starting, that every Core service is healthy, that `wire` wired the apps, and that
    qBittorrent's public IP is the VPN's, not yours.
 
 Without the wizard: copy `.env.example` to `.env`, fill it in, and run `sudo scripts/init.sh`.

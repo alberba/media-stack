@@ -2,8 +2,58 @@
 
 [Español](wiring.md)
 
-After the [install](install.en.md), the Core services run but don't know about each
-other. Do this once, in this order. Replace `<host>` with the Instance's LAN IP.
+The connections between the apps are made by **the `wire` container** (the Wiring) on
+every `docker compose up`: it starts, connects whatever is missing and exits. **It only
+adds what does not exist and never changes what you configured**
+([ADR-0002](adr/0002-wiring-only-seeds.md)), so you can change any setting in the web UIs
+and it will not undo it.
+
+See what it did with `docker compose logs wire`; `scripts/verify.sh` tells you if it failed.
+
+## What it does on its own
+
+Before the apps start, `wire-seed` writes into their App data (only if not there yet) the
+API keys and passwords `scripts/setup.sh` generated into `.env`. Nobody copies an API key.
+Then `wire`:
+
+| App | What it connects |
+| --- | --- |
+| Jellyfin | Finishes the startup wizard: admin `JELLYFIN_ADMIN_USER`, libraries **Películas** (`/data/media/movies`) and **Series** (`/data/media/tv`). |
+| Radarr, Sonarr | Root folder, and qBittorrent as download client with category `movies` / `tv`. |
+| Prowlarr | Radarr and Sonarr as apps (indexer sync), and FlareSolverr as proxy with the tag `flaresolverr`. |
+| Quality | A **Media Stack** profile in Radarr and Sonarr with the qualities picked in `setup.sh` (`QUALITIES`) and the [TRaSH Guides](https://trash-guides.info) custom formats, through [Recyclarr](https://recyclarr.dev). It prefers Spanish audio. |
+| Seerr | Signs in with the Jellyfin admin, enables its libraries and adds Radarr and Sonarr (Media Stack profile) as default servers. |
+| Bazarr | Connected to Radarr and Sonarr. |
+| qBittorrent | Login `QBITTORRENT_USER` / `QBITTORRENT_PASSWORD`, downloads in `/data/torrents`. |
+
+With the `vo` Profile the VO managers are wired the same way, with their own folders
+(`/data/media/movies-vo`, `/data/media/tv-vo`) and categories, in the same Jellyfin
+libraries, and in Seerr as a second, non-default server. Their quality profile prefers
+the original language.
+
+The **Media Stack** profile belongs to the Template: its qualities, their order and the
+cutoff are only written when it is created, so change them in Radarr/Sonarr as you like.
+Each start only refreshes the custom formats and their scores. Your other profiles are
+never touched.
+
+## What is left to you
+
+1. **Radarr, Sonarr, Prowlarr, Bazarr**: the first time you open them they ask you to
+   create a login (Settings > General > Authentication `Forms`).
+2. **Prowlarr**: add your indexers; they sync to Radarr and Sonarr on their own. Tag the
+   ones behind Cloudflare with `flaresolverr`.
+3. **Bazarr**: Settings > Languages (a default language profile) and Settings >
+   Providers (e.g. OpenSubtitles.com).
+4. **Seerr**: Settings > Users > import the Jellyfin users, so Viewers sign in with
+   their own account.
+
+Try it: request a film in Seerr. It should show up in Radarr, download in qBittorrent to
+`/data/torrents/movies`, import to `/data/media/movies` and appear in Jellyfin.
+
+An app that was configured before `wire` (for example, when moving an existing Instance)
+is left as it is: `wire` reads its API key from its App data and only adds what it lacks.
+If a credential is missing (`QBITTORRENT_PASSWORD`, `JELLYFIN_ADMIN_*`), its log says so
+with `WARN` and that step is skipped.
 
 ## How the services reach each other
 
@@ -20,8 +70,6 @@ name** on the media network (`http://radarr:7878`, `http://jellyfin:8096`).
 | Bazarr | Radarr, Sonarr | `localhost` `7878`, `localhost` `8989` |
 | Seerr | Jellyfin | `jellyfin` `8096` |
 | Seerr | Radarr, Sonarr | `radarr` `7878`, `sonarr` `8989` |
-
-Each *arr app's API key is in its Settings > General.
 
 ## `/data` and hardlinks
 
@@ -42,55 +90,4 @@ hardlink**: the file appears in the library without a copy, takes no extra space
 keeps seeding. Always use these `/data/...` paths inside the apps, never other mounts.
 To check an import: `stat -c %h <file>` in `DATA_ROOT/media` prints `2` or more.
 
-## 1. qBittorrent (`http://<host>:8080`)
-
-1. The first login's temporary password is in `docker logs qbittorrent`. Change it in
-   Options > WebUI.
-2. Options > Downloads: **Default save path** `/data/torrents`.
-3. Add two categories: `radarr` → `/data/torrents/movies` and `sonarr` → `/data/torrents/tv`.
-
-## 2. Radarr (`:7878`) and Sonarr (`:8989`)
-
-In each one:
-
-1. Settings > General: **Authentication** `Forms`, with a user and password.
-2. Settings > Media Management: **Root folder** `/data/media/movies` (Radarr) or
-   `/data/media/tv` (Sonarr). Leave **Use Hardlinks instead of Copy** on.
-3. Settings > Download Clients: add **qBittorrent**, host `localhost`, port `8080`, your
-   qBittorrent login, category `radarr` or `sonarr`.
-
-## 3. Prowlarr (`:9696`)
-
-1. Settings > Indexers: add a **FlareSolverr** proxy at `http://localhost:8191` with a
-   tag (e.g. `flaresolverr`). Put that tag only on indexers behind Cloudflare.
-2. Settings > Apps: add **Radarr** and **Sonarr**. Prowlarr server `http://localhost:9696`,
-   Radarr server `http://localhost:7878` (Sonarr `http://localhost:8989`), and each API key.
-3. Add your indexers. Prowlarr syncs them to Radarr and Sonarr: don't add indexers
-   there by hand.
-
-## 4. Bazarr (`:6767`)
-
-1. Settings > Languages: create a language profile, and set it as the default for
-   movies and series.
-2. Settings > Radarr and Settings > Sonarr: turn them on, address `localhost`, port
-   `7878` / `8989`, and each API key.
-3. Settings > Providers: add subtitle providers (e.g. OpenSubtitles.com).
-
-## 5. Jellyfin (`:8096`)
-
-1. Run the first-start wizard and create the admin user.
-2. Add two libraries: **Movies** at `/data/media/movies` and **Shows** at `/data/media/tv`.
-
-## 6. Seerr (`:5055`)
-
-1. **Sign in with Jellyfin**: address `jellyfin`, port `8096`, and the Jellyfin admin.
-   Pick the libraries to sync.
-2. Settings > Services: add a **Radarr** server (`radarr`, `7878`, API key, root folder
-   `/data/media/movies`, quality profile) and a **Sonarr** server (`sonarr`, `8989`,
-   `/data/media/tv`). Mark both as default.
-3. Settings > Users: import Jellyfin users, so Viewers log in with their Jellyfin account.
-
-Test it: request a movie in Seerr. It should show up in Radarr, download in qBittorrent
-under `/data/torrents/movies`, get imported into `/data/media/movies` and appear in Jellyfin.
-
-For the Profiles' own wiring (VO managers, Jackett, cleanuparr…) see [profiles.md](profiles.md).
+Wiring for the other Profiles (Jackett, cleanuparr…) is in [profiles.md](profiles.md).

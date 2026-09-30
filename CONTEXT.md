@@ -49,4 +49,9 @@ A machine outside the Instance that lends it compute (e.g. a desktop PC with a G
 _Avoid_: node (except for Tdarr's own term), remote server, slave
 _ES_: Worker
 
+**Wiring**:
+The one-shot `wire` container that runs on every `docker compose up`, connects the apps of an Instance to each other through their APIs and exits. It only seeds what is missing and never overwrites what an Operator configured.
+_Avoid_: provisioning, sync, config as code
+_ES_: Conexión de las apps
+
 "User" is reserved for accounts inside the apps (a Jellyfin user, a Seerr user).

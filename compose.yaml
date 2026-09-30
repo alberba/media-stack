@@ -9,6 +9,7 @@ include:
   - stacks/arr/compose.yaml
   - stacks/jellyfin/compose.yaml
   - stacks/seerr/compose.yaml
+  - stacks/wire/compose.yaml
   # Profiles
   - stacks/backup/compose.yaml
   - stacks/vo/compose.yaml
