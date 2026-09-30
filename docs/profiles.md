@@ -15,7 +15,7 @@ place. Stop its containers with `docker compose --profile <name> down <service>.
 
 | Profile | Services | Ports | Guide |
 | --- | --- | --- | --- |
-| `backup` | backup | — | [backup.md](backup.md) |
+| `backup` | backup | — | [backup.md](backup.en.md) |
 | `vo` | radarr-vo, sonarr-vo (behind the VPN) | 7879, 8990 | [below](#vo) |
 | `jackett` | jackett (behind the VPN) | 9117 | [below](#jackett) |
 | `seeding` | qui, cleanuparr | 7476, 11011 | [below](#seeding) |
@@ -102,10 +102,11 @@ these UIs off the internet (see [proxy](#proxy)).
 
 ## proxy
 
-Nginx Proxy Manager is the Instance's HTTPS entry point from the internet. **Publish only
-Jellyfin and Seerr**: they are made for Viewers, have their own logins and are built to
-face the internet. Everything else (the *arr apps, qBittorrent, the dashboards, NPM's
-own admin UI) is for the Operator and stays on the LAN or behind the `remote` Profile.
+Nginx Proxy Manager is the Instance's HTTPS entry point from the internet. Publish
+Jellyfin and Seerr: they are made for Viewers, have their own logins and are built to
+face the internet. The Operator apps are safer on the LAN or behind the `remote` Profile;
+if you publish Radarr, Sonarr, Bazarr or Homarr, follow the
+[security checklist](security.en.md#publishing-operator-apps-radarr-sonarr-bazarr-homarr).
 
 1. Forward ports 80 and 443 (never 81) from your router to the Instance, and point two
    DNS names at your public IP, e.g. `watch.example.com` and `request.example.com`.

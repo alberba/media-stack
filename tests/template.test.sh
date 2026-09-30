@@ -258,7 +258,7 @@ test_gitignore_allows_template_files() {
       stacks/extras/issue-automator/Dockerfile stacks/extras/issue-automator/main.py stacks/extras/tor/Dockerfile \
       stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js worker/compose.yaml worker/.env.example \
       worker/Tdarr_Node_Config.windows.json.example \
-      stacks/backup/Dockerfile stacks/backup/media-backup.sh docs/backup.es.md \
+      stacks/backup/Dockerfile stacks/backup/media-backup.sh docs/backup.en.md \
       tests/lib.sh .github/workflows/ci.yml .githooks/pre-commit README.md LICENSE renovate.json \
       .gitleaks.toml .gitignore; do
     gitignored "$path" && fail "$path is ignored"

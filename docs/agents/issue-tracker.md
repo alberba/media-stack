@@ -2,7 +2,7 @@
 
 Issues and specs for this repo live as GitHub issues. Use the `gh` CLI for all operations.
 
-> Repo actual: `alberba/docker-media-stack` (privado, se inferirá de `git remote`). Cuando se cree el repo público con historial limpio, los issues pasan a vivir allí; basta con cambiar el remoto.
+> Repo: `alberba/media-stack` (público). Se infiere de `git remote`.
 
 ## Conventions
 
