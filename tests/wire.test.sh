@@ -349,8 +349,13 @@ class Seerr(Case):
         steps.seerr(Client(app.url, {"X-Api-Key": "k"}), cfg, self.arrs(cfg))
         auth = app.posts("/api/v1/auth/jellyfin")[0][3]
         self.assertEqual((auth["username"], auth["hostname"], auth["port"], auth["serverType"]), ("ana", "jellyfin", 8096, 2))
-        library = [c[2] for c in app.calls if c[1] == "/api/v1/settings/jellyfin/library"]
-        self.assertEqual(library, [{"sync": "true"}, {"enable": "a1,b2"}])
+        library = [(c[0], c[1], c[3]) for c in app.calls if c[1].startswith("/api/v1/settings/jellyfin/library")]
+        self.assertEqual(library, [
+            ("POST", "/api/v1/settings/jellyfin/library/sync", {}),
+            ("GET", "/api/v1/settings/jellyfin/library", None),
+            ("PUT", "/api/v1/settings/jellyfin/library/a1", {"enabled": True}),
+            ("PUT", "/api/v1/settings/jellyfin/library/b2", {"enabled": True}),
+        ])
         radarr = app.lists["/api/v1/settings/radarr"][0]
         self.assertEqual((radarr["hostname"], radarr["port"], radarr["apiKey"]), ("radarr", 7878, "r" * 32))
         self.assertEqual((radarr["activeProfileId"], radarr["activeDirectory"], radarr["isDefault"]),
