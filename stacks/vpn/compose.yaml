@@ -52,7 +52,7 @@ services:
         aliases: [qbittorrent, prowlarr, flaresolverr, radarr, sonarr, bazarr, radarr-vo, sonarr-vo, jackett, mousehole]
 
   qbittorrent:
-    image: lscr.io/linuxserver/qbittorrent:5.2.3_v2.0.14-ls475
+    image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
     container_name: qbittorrent
     restart: unless-stopped
     network_mode: service:gluetun
