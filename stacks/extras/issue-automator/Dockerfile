@@ -1,6 +1,6 @@
 # Image of the extras Profile's issue-automator: one Python file, standard library only.
 # Built locally by `docker compose build`; every setting comes from the environment.
-FROM python:3.12-alpine
+FROM python:3.14-alpine
 
 WORKDIR /app
 COPY main.py ./
