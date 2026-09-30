@@ -125,9 +125,10 @@ def seerr(client, cfg, arr_clients):
             "hostname": "jellyfin", "port": 8096, "urlBase": "", "useSsl": False,
             "serverType": JELLYFIN,
         })
-        # Seerr v3.4: ?sync reads Jellyfin's libraries, ?enable turns on the listed ones.
-        libraries = client.get("/api/v1/settings/jellyfin/library", sync="true")
-        client.get("/api/v1/settings/jellyfin/library", enable=",".join(lib["id"] for lib in libraries))
+        # Seerr v3.5: POST .../sync reads Jellyfin's libraries, PUT .../{id} turns one on.
+        client.post("/api/v1/settings/jellyfin/library/sync")
+        for lib in client.get("/api/v1/settings/jellyfin/library"):
+            client.put(f"/api/v1/settings/jellyfin/library/{lib['id']}", {"enabled": True})
         log.append("seerr: signed in with Jellyfin, libraries enabled")
     for kind in ("radarr", "sonarr"):
         servers = client.get(f"/api/v1/settings/{kind}")
