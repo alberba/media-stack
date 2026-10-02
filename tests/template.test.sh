@@ -110,6 +110,7 @@ test_the_profile_module_and_compose_agree_on_the_profiles() {
 test_docs_and_env_example_describe_every_profile() {
   local in_module in_docs in_env
   in_module="$(profiles_all | sort | xargs)"
+  # shellcheck disable=SC2016  # the backticks in the pattern are literal
   in_docs="$(grep -oE '^\| `[a-z]+` \|' "$REPO/docs/profiles.md" | tr -d '|` ' | sort | xargs)"
   in_env="$(awk '/^# Profiles$/ {on=1} /^COMPOSE_PROFILES=/ {on=0} on && /^#   [a-z]+ / {print $2}' "$REPO/.env.example" | sort | xargs)"
   [ "$in_docs" = "$in_module" ] || fail "docs/profiles.md table has '$in_docs', the Profile module has '$in_module'"

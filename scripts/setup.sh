@@ -14,7 +14,7 @@ EXAMPLE_FILE="${EXAMPLE_FILE:-$REPO/.env.example}"
 INIT_SCRIPT="${INIT_SCRIPT:-$REPO/scripts/init.sh}"
 DRI_DEVICE="${DRI_DEVICE:-/dev/dri}"
 
-# shellcheck source=lib/profiles.sh
+# shellcheck source=scripts/lib/profiles.sh
 . "$REPO/scripts/lib/profiles.sh"
 
 # VPN provider data, checked against the gluetun image pinned in stacks/vpn/compose.yaml

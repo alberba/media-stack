@@ -10,7 +10,7 @@ ENV_FILE="${ENV_FILE:-$REPO/.env}"
 TUN_DEVICE="${TUN_DEVICE:-/dev/net/tun}"
 MIN_COMPOSE="2.20.0"
 
-# shellcheck source=lib/profiles.sh
+# shellcheck source=scripts/lib/profiles.sh
 . "$REPO/scripts/lib/profiles.sh"
 
 REQUIRED_VARS=(APPDATA_ROOT DATA_ROOT PUID PGID TZ VPN_SERVICE_PROVIDER VPN_TYPE)
