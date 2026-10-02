@@ -2,7 +2,7 @@
 # Docker (tells you when an image has a newer version).
 services:
   beszel:
-    image: henrygd/beszel:0.20.0
+    image: henrygd/beszel:0.21.0
     container_name: beszel
     profiles: [monitoring]
     restart: unless-stopped
