@@ -121,3 +121,12 @@ abre PRs para subirlas.
 ## Licencia
 
 MIT
+
+## Upgrading
+
+Las Instancias siguen releases versionadas del Template. Consulta
+[releases y upgrades](docs/upgrading.md): `scripts/upgrade.sh --dry-run` muestra
+los cambios; `sudo scripts/upgrade.sh` aplica la última release y
+`sudo scripts/upgrade.sh --rollback` recupera el código y las imágenes anteriores.
+Renovate actualiza imágenes en main para los mantenedores; What's Up Docker
+(Perfil monitoring) solo avisa de actualizaciones de imágenes.

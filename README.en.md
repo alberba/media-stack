@@ -120,3 +120,11 @@ them.
 ## License
 
 MIT
+
+## Upgrading
+
+Instances follow versioned Template releases. See [releases and upgrades](docs/upgrading.md):
+`scripts/upgrade.sh --dry-run` shows changes, `sudo scripts/upgrade.sh` applies the
+latest release and `sudo scripts/upgrade.sh --rollback` restores previous code and
+images. Renovate bumps images on main for maintainers; What's Up Docker
+(the monitoring Profile) only reports upstream image updates.
