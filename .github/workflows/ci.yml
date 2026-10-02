@@ -25,7 +25,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
       - name: Lint scripts
-        run: shellcheck scripts/*.sh tests/*.sh stacks/*/*.sh .githooks/pre-commit
+        run: shellcheck scripts/*.sh scripts/lib/*.sh tests/*.sh stacks/*/*.sh .githooks/pre-commit
       - name: Validate the Core, and the Core with every Profile, with docker compose config
         run: |
           sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > .env
@@ -38,6 +38,8 @@ jobs:
           docker compose --project-directory worker config --quiet
       - name: Template tests
         run: tests/template.test.sh
+      - name: Profile module tests
+        run: tests/profiles.test.sh
       - name: init.sh tests
         run: sudo tests/init.test.sh
       - name: setup.sh tests

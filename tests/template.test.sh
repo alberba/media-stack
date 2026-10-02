@@ -6,6 +6,7 @@ set -uo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/tests/lib.sh"
+. "$REPO/scripts/lib/profiles.sh"
 
 CORE_SERVICES="bazarr flaresolverr gluetun jellyfin prowlarr qbittorrent radarr seerr sonarr wire wire-seed"
 BEHIND_VPN="bazarr flaresolverr prowlarr qbittorrent radarr sonarr"
@@ -94,6 +95,15 @@ test_every_profile_is_valid_and_adds_exactly_its_services() {
     expected="$(echo "${PROFILE_SERVICES[$profile]} $CORE_SERVICES" | xargs -n1 | sort | xargs)"
     [ "$services" = "$expected" ] || fail "Profile $profile: expected '$expected', got '$services'"
   done
+}
+
+test_the_profile_module_and_compose_agree_on_the_profiles() {
+  local in_module in_compose in_table
+  in_module="$(profiles_all | sort | xargs)"
+  in_compose="$(compose config --profiles | sort | xargs)"
+  in_table="$(printf '%s\n' "${!PROFILE_SERVICES[@]}" | sort | xargs)"
+  [ "$in_module" = "$in_compose" ] || fail "scripts/lib/profiles.sh lists '$in_module', compose declares '$in_compose'"
+  [ "$in_table" = "$in_compose" ] || fail "PROFILE_SERVICES lists '$in_table', compose declares '$in_compose'"
 }
 
 test_core_and_all_profiles_are_valid_together() {
@@ -267,7 +277,7 @@ test_gitignore_blocks_instance_files() {
 
 test_gitignore_allows_template_files() {
   local path
-  for path in compose.yaml compose.gpu.yaml stacks/arr/compose.yaml .env.example scripts/init.sh docs/install.md \
+  for path in compose.yaml compose.gpu.yaml stacks/arr/compose.yaml .env.example scripts/init.sh scripts/lib/profiles.sh docs/install.md \
       stacks/extras/issue-automator/Dockerfile stacks/extras/issue-automator/main.py stacks/extras/tor/Dockerfile \
       stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js worker/compose.yaml worker/.env.example \
       worker/Tdarr_Node_Config.windows.json.example \

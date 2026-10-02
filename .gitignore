@@ -26,6 +26,7 @@
 !/worker/compose.yaml
 !/worker/*.example
 !/scripts/*.sh
+!/scripts/lib/*.sh
 !/tests/*.sh
 !/docs/**/*.md
 !/examples/**/*.example
