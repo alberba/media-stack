@@ -102,4 +102,22 @@ test_unknown_profiles_are_the_listed_names_that_do_not_exist() {
   [ -z "$(profiles_unknown "backup,vo")" ] || fail "known names reported"
 }
 
+# The wire container reads COMPOSE_PROFILES in Python (stacks/wire/wire/config.py): both
+# readers must agree on what a value means.
+test_the_wire_container_reads_compose_profiles_the_same_way() {
+  local value profile in_python
+  for value in "backup,vo" "backup, vo" " vo ,jackett" ",vo," "v o" "Vo" "vo;jackett" ""; do
+    in_python="$(COMPOSE_PROFILES="$value" PYTHONPATH="$REPO/stacks/wire" python3 -B -c \
+      'import os; from wire import config; print(*sorted(config.profiles(os.environ)))')" \
+      || fail "wire could not read '$value'"
+    for profile in $(profiles_all); do
+      if profile_on "$profile" "$value"; then
+        [[ " $in_python " == *" $profile "* ]] || fail "'$value': bash has $profile on, wire has: $in_python"
+      else
+        [[ " $in_python " != *" $profile "* ]] || fail "'$value': wire has $profile on, bash does not"
+      fi
+    done
+  done
+}
+
 run_tests

@@ -106,6 +106,16 @@ test_the_profile_module_and_compose_agree_on_the_profiles() {
   [ "$in_table" = "$in_compose" ] || fail "PROFILE_SERVICES lists '$in_table', compose declares '$in_compose'"
 }
 
+# Prose may be reworded freely; the names are what must not drift.
+test_docs_and_env_example_describe_every_profile() {
+  local in_module in_docs in_env
+  in_module="$(profiles_all | sort | xargs)"
+  in_docs="$(grep -oE '^\| `[a-z]+` \|' "$REPO/docs/profiles.md" | tr -d '|` ' | sort | xargs)"
+  in_env="$(awk '/^# Profiles$/ {on=1} /^COMPOSE_PROFILES=/ {on=0} on && /^#   [a-z]+ / {print $2}' "$REPO/.env.example" | sort | xargs)"
+  [ "$in_docs" = "$in_module" ] || fail "docs/profiles.md table has '$in_docs', the Profile module has '$in_module'"
+  [ "$in_env" = "$in_module" ] || fail ".env.example lists '$in_env', the Profile module has '$in_module'"
+}
+
 test_core_and_all_profiles_are_valid_together() {
   OUTPUT="$(compose --profile '*' config -q 2>&1)"; STATUS=$?
   assert_status 0
