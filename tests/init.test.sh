@@ -6,6 +6,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 INIT="$REPO/scripts/init.sh"
 . "$REPO/tests/lib.sh"
+. "$REPO/scripts/lib/profiles.sh"
 
 # A sandbox per test: a valid .env, a fake tun device and a fake docker.
 setup() {
@@ -225,25 +226,10 @@ test_backup_source_must_exist_when_set() {
   assert_output_contains "BACKUP_SOURCE"
 }
 
-# Folders each Profile's services write to, all owned by PUID:PGID unless listed below.
-declare -A PROFILE_DIRS=(
-  [vo]="radarr-vo sonarr-vo"
-  [jackett]="jackett"
-  [seeding]="qui cleanuparr"
-  [cleanup]="maintainerr"
-  [dashboard]="homarr dockge"
-  [monitoring]="beszel/data beszel/socket beszel/agent wud"
-  [proxy]="npm/data npm/letsencrypt"
-  [remote]="tailscale"
-  [extras]="mousehole filebrowser/config filebrowser/database"
-  [transcode]="tdarr/server tdarr/configs tdarr/logs tdarr/cache"
-)
-# Services that run as root and keep secrets in their folder.
-ROOT_DIRS="tailscale npm/data npm/letsencrypt"
-
 # Fills in what each Profile needs, so only the thing under test is missing.
 enable_profiles() {
   set_var COMPOSE_PROFILES "$1"
+  set_var RESTIC_PASSWORD "long-secret"
   set_var HOMARR_SECRET_KEY "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
   set_var TAILSCALE_AUTHKEY "tskey-auth-test"
   set_var MOUSEHOLE_AUTH_PASSWORD "long-password"
@@ -251,17 +237,19 @@ enable_profiles() {
 }
 
 test_every_profile_creates_its_folders_with_the_right_owner() {
-  local profile dir expected
-  enable_profiles "$(IFS=,; echo "${!PROFILE_DIRS[*]}")"
+  local profile owner dir expected
+  enable_profiles "$(profiles_all | paste -sd,)"
   run_init
   assert_status 0
-  for profile in "${!PROFILE_DIRS[@]}"; do
-    for dir in ${PROFILE_DIRS[$profile]}; do
+  for profile in $(profiles_all); do
+    while read -r owner dir; do
       assert_dir "$SANDBOX/appdata/$dir"
       expected="1234:5678"
-      [[ " $ROOT_DIRS " == *" $dir "* ]] && expected="0:0"
+      [ "$owner" = app ] || expected="0:0"
       assert_owner "$SANDBOX/appdata/$dir" "$expected"
-    done
+      [ "$owner" != private ] || [ "$(stat -c %a "$SANDBOX/appdata/$dir")" = 700 ] \
+        || fail "$dir is readable by others"
+    done < <(profile_dirs "$profile")
   done
 }
 
@@ -273,6 +261,32 @@ test_profile_folders_are_not_created_when_the_profile_is_off() {
   for dir in jackett tdarr tailscale homarr; do
     [ ! -e "$SANDBOX/appdata/$dir" ] || fail "$dir created without its Profile"
   done
+}
+
+test_an_unknown_profile_stops_init_and_lists_the_valid_ones() {
+  set_var COMPOSE_PROFILES "vo,transcod"
+  run_init
+  assert_status 1
+  assert_output_contains "transcod"
+  assert_output_contains "backup"
+  assert_output_contains "transcode"
+  [ ! -e "$SANDBOX/appdata" ] || fail "appdata was created despite an unknown Profile"
+}
+
+test_an_unknown_profile_does_not_hide_the_other_errors() {
+  set_var COMPOSE_PROFILES "backup,transcod"
+  run_init
+  assert_status 1
+  assert_output_contains "transcod"
+  assert_output_contains "RESTIC_PASSWORD"
+}
+
+test_spaces_around_profile_names_are_ignored() {
+  enable_profiles "vo, jackett"
+  run_init
+  assert_status 0
+  assert_dir "$SANDBOX/appdata/radarr-vo"
+  assert_dir "$SANDBOX/appdata/jackett"
 }
 
 test_tailscale_state_is_private() {

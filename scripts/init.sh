@@ -10,6 +10,9 @@ ENV_FILE="${ENV_FILE:-$REPO/.env}"
 TUN_DEVICE="${TUN_DEVICE:-/dev/net/tun}"
 MIN_COMPOSE="2.20.0"
 
+# shellcheck source=scripts/lib/profiles.sh
+. "$REPO/scripts/lib/profiles.sh"
+
 REQUIRED_VARS=(APPDATA_ROOT DATA_ROOT PUID PGID TZ VPN_SERVICE_PROVIDER VPN_TYPE)
 DEFAULT_NETWORK="media-network"
 
@@ -17,24 +20,6 @@ DEFAULT_NETWORK="media-network"
 APPDATA_DIRS=(gluetun qbittorrent prowlarr radarr sonarr bazarr jellyfin/config jellyfin/cache jellyfin/ui wire)
 # Seerr runs as the image's fixed `node` user.
 SEERR_OWNER="1000:1000"
-# Folders under APPDATA_ROOT for each Profile, owned by PUID:PGID. Created only when
-# the Profile is listed in COMPOSE_PROFILES.
-declare -A PROFILE_DIRS=(
-  [vo]="radarr-vo sonarr-vo"
-  [jackett]="jackett"
-  [seeding]="qui cleanuparr"
-  [cleanup]="maintainerr"
-  [dashboard]="homarr dockge"
-  [monitoring]="beszel/data beszel/socket beszel/agent wud"
-  [extras]="mousehole filebrowser/config filebrowser/database"
-  [transcode]="tdarr/server tdarr/configs tdarr/logs tdarr/cache"
-)
-# Profile folders of services that run as root and keep secrets there (certificates,
-# the Tailscale node key): owned by root, not readable by others.
-declare -A PROFILE_ROOT_DIRS=(
-  [proxy]="npm/data npm/letsencrypt"
-  [remote]="tailscale"
-)
 # TRaSH-style layout: downloads and library on the same filesystem, so imports are hardlinks.
 DATA_DIRS=(torrents/movies torrents/tv media/movies media/tv)
 
@@ -61,8 +46,8 @@ load_env() {
 
 env_get() { local name="ENV_$1"; printf '%s' "${!name:-}"; }
 
-# True when Profile $1 is listed in COMPOSE_PROFILES.
-profile_on() { [[ ",$(env_get COMPOSE_PROFILES | tr -d '[:space:]')," == *",$1,"* ]]; }
+# True when Profile $1 is listed in the .env's COMPOSE_PROFILES.
+profile_enabled() { profile_on "$1" "$(env_get COMPOSE_PROFILES)"; }
 
 # True when version $1 >= version $2 (both "X.Y.Z", optional leading "v").
 version_ge() {
@@ -115,34 +100,57 @@ check_vars() {
     "") ;;
     *) add_error "VPN_TYPE must be 'wireguard' or 'openvpn', got '$(env_get VPN_TYPE)'." ;;
   esac
-  if profile_on backup; then
-    [ -n "$(env_get RESTIC_PASSWORD)" ] || add_error "RESTIC_PASSWORD is empty (needed by the backup Profile)."
+  check_profiles
+  if [[ "$(env_get COMPOSE_FILE)" == *compose.gpu.yaml* ]]; then
+    [[ "$(env_get RENDER_GID)" =~ ^[0-9]+$ ]] \
+      || add_error "RENDER_GID must be the host's render group id for compose.gpu.yaml: see 'getent group render'."
+  fi
+}
+
+# One setting a Profile requires. Most only need a value; two have rules of their own.
+check_profile_setting() {
+  local profile="$1" setting="$2"
+  case "$setting" in
+    HOMARR_SECRET_KEY)
+      [[ "$(env_get HOMARR_SECRET_KEY)" =~ ^[0-9a-fA-F]{64}$ ]] \
+        || add_error "HOMARR_SECRET_KEY must be 64 hex characters (needed by the $profile Profile): generate it with 'openssl rand -hex 32'."
+      ;;
+    TAILSCALE_AUTHKEY)
+      # A node that already has its state keeps its identity and needs no new login.
+      [ -n "$(env_get TAILSCALE_AUTHKEY)" ] || [ -s "$(env_get APPDATA_ROOT)/tailscale/tailscaled.state" ] \
+        || add_error "TAILSCALE_AUTHKEY is empty and $(env_get APPDATA_ROOT)/tailscale has no node state (needed by the $profile Profile)."
+      ;;
+    *)
+      [ -n "$(env_get "$setting")" ] || add_error "$setting is empty (needed by the $profile Profile)."
+      ;;
+  esac
+}
+
+# Names one per line, as "a, b, c".
+join_names() { paste -sd, | sed 's/,/, /g'; }
+
+# The Profiles in COMPOSE_PROFILES must exist, and each one gets what it requires. A
+# name that is not a Profile is reported along with the other errors, not instead of them.
+check_profiles() {
+  local unknown profile setting
+  unknown="$(profiles_unknown "$(env_get COMPOSE_PROFILES)" | join_names)"
+  if [ -n "$unknown" ]; then
+    add_error "COMPOSE_PROFILES lists '$unknown', which is not a Profile. Valid ones: $(profiles_all | join_names)."
+  fi
+  for profile in $(profiles_all); do
+    profile_enabled "$profile" || continue
+    for setting in $(profile_requires "$profile"); do check_profile_setting "$profile" "$setting"; done
+  done
+  if profile_enabled backup; then
     local source; source="$(env_get BACKUP_SOURCE)"
     [ -z "$source" ] || [ -d "$source" ] || add_error "BACKUP_SOURCE $source does not exist: the backup would be empty."
   fi
-  if profile_on dashboard; then
-    [[ "$(env_get HOMARR_SECRET_KEY)" =~ ^[0-9a-fA-F]{64}$ ]] \
-      || add_error "HOMARR_SECRET_KEY must be 64 hex characters (needed by the dashboard Profile): generate it with 'openssl rand -hex 32'."
-  fi
-  if profile_on remote; then
-    # A node that already has its state keeps its identity and needs no new login.
-    [ -n "$(env_get TAILSCALE_AUTHKEY)" ] || [ -s "$(env_get APPDATA_ROOT)/tailscale/tailscaled.state" ] \
-      || add_error "TAILSCALE_AUTHKEY is empty and $(env_get APPDATA_ROOT)/tailscale has no node state (needed by the remote Profile)."
+  if profile_enabled remote; then
     local route
     for route in $(env_get TAILSCALE_ROUTES | tr ',' ' '); do
       [[ "$route" =~ ^[0-9a-fA-F:.]+/[0-9]{1,3}$ ]] \
         || add_error "TAILSCALE_ROUTES: '$route' is not a subnet like 192.168.1.0/24."
     done
-  fi
-  if profile_on monitoring; then
-    [ -n "$(env_get WUD_ADMIN_PASSWORD)" ] || add_error "WUD_ADMIN_PASSWORD is empty (needed by the monitoring Profile)."
-  fi
-  if profile_on extras; then
-    [ -n "$(env_get MOUSEHOLE_AUTH_PASSWORD)" ] || add_error "MOUSEHOLE_AUTH_PASSWORD is empty (needed by the extras Profile)."
-  fi
-  if [[ "$(env_get COMPOSE_FILE)" == *compose.gpu.yaml* ]]; then
-    [[ "$(env_get RENDER_GID)" =~ ^[0-9]+$ ]] \
-      || add_error "RENDER_GID must be the host's render group id for compose.gpu.yaml: see 'getent group render'."
   fi
 }
 
@@ -155,24 +163,21 @@ make_owned_dir() {
 }
 
 prepare_folders() {
-  local owner root dir
+  local owner root dir kind
   owner="$(env_get PUID):$(env_get PGID)"
   root="$(env_get APPDATA_ROOT)"
   for dir in "${APPDATA_DIRS[@]}"; do make_owned_dir "$root/$dir" "$owner"; done
   make_owned_dir "$root/seerr" "$SEERR_OWNER"
-  # The backup container runs as root to read every service's files.
-  if profile_on backup; then make_owned_dir "$root/backup" "0:0"; fi
   local profile
-  for profile in "${!PROFILE_DIRS[@]}"; do
-    profile_on "$profile" || continue
-    for dir in ${PROFILE_DIRS[$profile]}; do make_owned_dir "$root/$dir" "$owner"; done
-  done
-  for profile in "${!PROFILE_ROOT_DIRS[@]}"; do
-    profile_on "$profile" || continue
-    for dir in ${PROFILE_ROOT_DIRS[$profile]}; do
-      make_owned_dir "$root/$dir" "0:0"
-      chmod 700 "$root/$dir"
-    done
+  for profile in $(profiles_all); do
+    profile_enabled "$profile" || continue
+    while read -r kind dir; do
+      case "$kind" in
+        app) make_owned_dir "$root/$dir" "$owner" ;;
+        root) make_owned_dir "$root/$dir" "0:0" ;;
+        private) make_owned_dir "$root/$dir" "0:0"; chmod 700 "$root/$dir" ;;
+      esac
+    done < <(profile_dirs "$profile")
   done
 
   root="$(env_get DATA_ROOT)"
