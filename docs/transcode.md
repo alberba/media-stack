@@ -37,7 +37,7 @@ To change it, edit the file in the Template (not in Tdarr's UI) and restart `tda
 
 ## 1. The Instance
 
-1. Add `transcode` to `COMPOSE_PROFILES`, run `sudo scripts/init.sh` and
+1. Add `transcode` to `COMPOSE_PROFILES`, run `scripts/init.sh` and
    `docker compose up -d`. Tdarr's UI is at `http://<instance>:8265`.
 2. Optional, for Jellyfin's own hardware transcoding (and Tdarr's) with the Instance's
    Intel/AMD GPU: set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` and `RENDER_GID`
@@ -75,6 +75,7 @@ Requirements: Docker with Compose, the NVIDIA driver and the
    ```sh
    git clone https://github.com/alberba/media-stack.git && cd media-stack/worker
    cp .env.example .env    # TDARR_SERVER_IP, TDARR_NODE_NAME (e.g. pc-3070-linux), paths
+   python3 ../scripts/env_contract.py validate --scope worker --file .env
    docker compose up -d
    ```
 

@@ -9,6 +9,7 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$REPO/scripts/env_contract.sh"
 ENV_FILE="${ENV_FILE:-$REPO/.env}"
 EXAMPLE_FILE="${EXAMPLE_FILE:-$REPO/.env.example}"
 INIT_SCRIPT="${INIT_SCRIPT:-$REPO/scripts/init.sh}"
@@ -46,63 +47,43 @@ QUALITY_NAMES=("Remux-2160p" "Bluray-2160p" "WEB 2160p" "HDTV-2160p" "Remux-1080
 QUALITY_DEFAULTS="Remux-2160p,Bluray-2160p,WEB 2160p,HDTV-2160p,Remux-1080p,Bluray-1080p,WEB 1080p,HDTV-1080p,Bluray-720p,WEB 720p"
 
 WORK=""
+ENV_VALUES_TEMP=""
 EXISTING=0
 PROFILES_CHOSEN=""
+declare -A CURRENT_ENV=()
 
 die() { echo "error: $*" >&2; exit 1; }
 
 # --- The .env being edited ----------------------------------------------------
 
-# Current value of $1 in the working file (last active line wins), unquoted.
+# Compose reads the working file once; later writes update the in-memory view.
+load_work_env() {
+  if ! env_contract_load CURRENT_ENV "$WORK" file; then
+    die "could not read $WORK as a Compose .env file"
+  fi
+}
+
 get_env() {
-  local line value
-  line="$(grep -E "^$1=" "$WORK" | tail -n 1 || true)"
-  value="${line#*=}"
-  if [[ "$value" =~ ^\"([^\"]*)\" || "$value" =~ ^\'([^\']*)\' ]]; then
-    value="${BASH_REMATCH[1]}"
-  else
-    value="${value%%[[:space:]]#*}"
-    value="${value%"${value##*[![:space:]]}"}"
-  fi
-  printf '%s' "$value"
+  printf '%s' "${CURRENT_ENV[$1]:-}"
 }
 
-# Quotes a value only when compose would otherwise misread it.
-quote_value() {
-  local v="$1"
-  if [[ "$v" =~ [[:space:]\#\'\"\$\\] ]]; then
-    if [[ "$v" != *\'* ]]; then
-      printf "'%s'" "$v"
-    else
-      v="${v//\\/\\\\}"; v="${v//\"/\\\"}"; v="${v//\$/\\\$}"
-      printf '"%s"' "$v"
-    fi
-  else
-    printf '%s' "$v"
-  fi
-}
-
-# Sets KEY=value in place: replaces the active line, else uncomments the example line,
-# else appends.
+# The contract writes Compose values, preserving unrelated Operator settings and notes.
 set_env() {
-  local key="$1" value tmp
-  value="$(quote_value "$2")"
-  tmp="$(mktemp)"
-  if grep -qE "^$key=" "$WORK"; then
-    K="$key" V="$value" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
-      index($0, k "=") == 1 { print k "=" v; next } { print }' "$WORK" > "$tmp"
-  elif grep -qE "^# $key=" "$WORK"; then
-    K="$key" V="$value" awk 'BEGIN { k = ENVIRON["K"]; v = ENVIRON["V"] }
-      !done && index($0, "# " k "=") == 1 { print k "=" v; done = 1; next } { print }' "$WORK" > "$tmp"
+  printf '%s' "$2" | python3 "$REPO/scripts/env_contract.py" set --file "$WORK" --name "$1"
+  # shellcheck disable=SC2016 # Look for literal Compose interpolation.
+  if grep -qF '${' "$WORK"; then
+    load_work_env
   else
-    { cat "$WORK"; printf '%s=%s\n' "$key" "$value"; } > "$tmp"
+    CURRENT_ENV["$1"]="$2"
   fi
-  cat "$tmp" > "$WORK"
-  rm -f "$tmp"
 }
 
 # Turns an active KEY=value line back into the commented example.
-comment_out_env() { sed -i "s|^$1=|# $1=|" "$WORK"; }
+comment_out_env() {
+  python3 "$REPO/scripts/env_contract.py" comment --file "$WORK" --name "$1"
+  # shellcheck disable=SC2016 # Look for literal Compose interpolation.
+  if grep -qF '${' "$WORK"; then load_work_env; else CURRENT_ENV["$1"]=""; fi
+}
 
 # --- Prompts ------------------------------------------------------------------
 
@@ -449,6 +430,10 @@ ask_telegram() {
 # --- Main ---------------------------------------------------------------------
 
 finish() {
+  # Check the complete working file with Compose before replacing the Operator's .env.
+  python3 "$REPO/scripts/env_contract.py" resolve --file "$WORK" --file-only > /dev/null \
+    || die "the answers could not be written as a Compose .env file"
+  python3 "$REPO/scripts/env_contract.py" overrides --file "$WORK" --label "$ENV_FILE"
   if [ -f "$ENV_FILE" ]; then
     cp "$ENV_FILE" "$ENV_FILE.bak"
     echo "Previous $ENV_FILE saved as $ENV_FILE.bak."
@@ -464,14 +449,10 @@ finish() {
 hand_off() {
   section "Prepare the Instance"
   if ! confirm "Run scripts/init.sh now (validates, creates folders and the network)?" y; then
-    echo "Later: sudo scripts/init.sh"
+    echo "Later: scripts/init.sh"
     return
   fi
-  if [ "$(id -u)" = 0 ]; then
-    "$INIT_SCRIPT"
-  else
-    sudo "$INIT_SCRIPT"
-  fi
+  "$INIT_SCRIPT"
 }
 
 main() {
@@ -483,7 +464,8 @@ main() {
     [ -f "$EXAMPLE_FILE" ] || die "no $EXAMPLE_FILE to start from."
     WORK="$(mktemp)"; cp "$EXAMPLE_FILE" "$WORK"
   fi
-  trap 'rm -f "$WORK"' EXIT
+  trap 'rm -f "$WORK" "${ENV_VALUES_TEMP:-}"' EXIT
+  load_work_env
 
   ask_paths
   ask_vpn

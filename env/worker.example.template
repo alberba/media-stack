@@ -3,21 +3,21 @@
 
 # Owner of the files the node writes into the library. Use the same PUID/PGID as the
 # Instance, and mount the share with them (docs/transcode.md).
-PUID=1000
-PGID=1000
-TZ=Etc/UTC
+PUID=@
+PGID=@
+TZ=@
 
 # The Instance's address (LAN or Tailscale IP) where Tdarr listens on port 8266.
-TDARR_SERVER_IP=
+TDARR_SERVER_IP=@
 # Unique name for this node: machine plus OS, e.g. pc-3070-linux. If the same PC also
 # boots Windows and runs a node there, give that one another name (pc-3070-win).
-TDARR_NODE_NAME=
+TDARR_NODE_NAME=@
 # Only if Tdarr's authentication is on.
-TDARR_API_KEY=
+TDARR_API_KEY=@
 
 # Where the Instance's library (its DATA_ROOT/media, shared over SMB) is mounted here.
-WORKER_LIBRARY=/mnt/media-stack/media
+WORKER_LIBRARY=@
 # Transcode cache on a fast local disk, with room for a few of your largest files.
-WORKER_CACHE=/var/cache/tdarr
+WORKER_CACHE=@
 # The node's own config and logs.
-WORKER_DATA=/opt/tdarr-node
+WORKER_DATA=@

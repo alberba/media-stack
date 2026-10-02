@@ -8,6 +8,11 @@ setup() {
   SANDBOX="$(mktemp -d)"
   mkdir -p "$SANDBOX/repo/scripts" "$SANDBOX/repo/tests" "$SANDBOX/repo/docs/releases" "$SANDBOX/repo/worker" "$SANDBOX/bin"
   cp "$REPO/scripts/release.sh" "$SANDBOX/repo/scripts/"
+  cat > "$SANDBOX/repo/scripts/env_contract.py" <<'SCRIPT'
+import sys
+if sys.argv[1] == "fixture":
+    print("COMPOSE_PROFILES=\nAPPDATA_ROOT=/tmp/app")
+SCRIPT
   cd "$SANDBOX/repo" || exit 1
   git init -q -b main; git config user.name Test; git config user.email test@example.invalid; git config core.hooksPath /dev/null
   printf 'COMPOSE_PROFILES=\nAPPDATA_ROOT=/tmp/app\n' > .env.example

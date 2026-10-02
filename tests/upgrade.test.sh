@@ -8,6 +8,17 @@ setup() {
   SANDBOX="$(mktemp -d)"
   mkdir -p "$SANDBOX/bin" "$SANDBOX/instance/scripts" "$SANDBOX/instance/docs/releases"
   cp "$REPO/scripts/upgrade.sh" "$SANDBOX/instance/scripts/"
+  cat > "$SANDBOX/instance/scripts/env_contract.py" <<'SCRIPT'
+import pathlib, sys
+command = sys.argv[1]
+path = pathlib.Path(sys.argv[sys.argv.index("--file") + 1])
+name = sys.argv[sys.argv.index("--name") + 1]
+if command == "get":
+    print(next(line.split("=", 1)[1] for line in path.read_text().splitlines() if line.startswith(name + "=")), end="")
+elif command == "set":
+    with path.open("a") as file:
+        file.write(f"\n{name}={sys.stdin.read()}\n")
+SCRIPT
   cd "$SANDBOX/instance" || exit 1
   git init -q -b main
   git config user.email test@example.invalid

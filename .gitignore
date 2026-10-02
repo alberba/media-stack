@@ -27,6 +27,9 @@
 !/worker/*.example
 !/scripts/*.sh
 !/scripts/lib/*.sh
+!/scripts/env_contract.py
+!/env/catalog.json
+!/env/*.template
 !/tests/*.sh
 !/docs/**/*.md
 !/examples/**/*.example
