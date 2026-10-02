@@ -126,13 +126,16 @@ check_profile_setting() {
   esac
 }
 
-# The Profiles in COMPOSE_PROFILES must exist, and each one gets what it requires.
+# Names one per line, as "a, b, c".
+join_names() { paste -sd, | sed 's/,/, /g'; }
+
+# The Profiles in COMPOSE_PROFILES must exist, and each one gets what it requires. A
+# name that is not a Profile is reported along with the other errors, not instead of them.
 check_profiles() {
   local unknown profile setting
-  unknown="$(profiles_unknown "$(env_get COMPOSE_PROFILES)" | paste -sd, | sed 's/,/, /g')"
+  unknown="$(profiles_unknown "$(env_get COMPOSE_PROFILES)" | join_names)"
   if [ -n "$unknown" ]; then
-    add_error "COMPOSE_PROFILES lists '$unknown', which is not a Profile. Valid ones: $(profiles_all | paste -sd, | sed 's/,/, /g')."
-    return
+    add_error "COMPOSE_PROFILES lists '$unknown', which is not a Profile. Valid ones: $(profiles_all | join_names)."
   fi
   for profile in $(profiles_all); do
     profile_enabled "$profile" || continue

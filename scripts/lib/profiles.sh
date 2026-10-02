@@ -5,17 +5,25 @@
 # The services a Profile adds are not listed here: compose declares them (`profiles:` in
 # each stack), and tests/template.test.sh checks that the names agree.
 
-# True when Profile $1 is listed in the COMPOSE_PROFILES value $2: comma separated,
-# spaces around a name ignored, empty items dropped, names case sensitive.
-profile_on() {
-  local name="$1" item
+# The names in the COMPOSE_PROFILES value $1, one per line: comma separated, spaces around
+# a name ignored, empty items dropped.
+_profile_items() {
+  local item
   local -a items
-  IFS=, read -r -a items <<< "$2"
+  IFS=, read -r -a items <<< "$1"
   for item in "${items[@]}"; do
     item="${item#"${item%%[![:space:]]*}"}"
     item="${item%"${item##*[![:space:]]}"}"
-    [ "$item" = "$name" ] && return 0
+    [ -z "$item" ] || printf '%s\n' "$item"
   done
+}
+
+# True when Profile $1 is listed in the COMPOSE_PROFILES value $2 (names are case sensitive).
+profile_on() {
+  local item
+  while IFS= read -r item; do
+    [ "$item" = "$1" ] && return 0
+  done < <(_profile_items "$2")
   return 1
 }
 
@@ -85,12 +93,8 @@ profile_requires() {
 # The names in the COMPOSE_PROFILES value $1 that are not Profiles, one per line.
 profiles_unknown() {
   local item
-  local -a items
-  IFS=, read -r -a items <<< "$1"
-  for item in "${items[@]}"; do
-    item="${item#"${item%%[![:space:]]*}"}"
-    item="${item%"${item##*[![:space:]]}"}"
-    [ -z "$item" ] || profile_exists "$item" || printf '%s\n' "$item"
-  done
+  while IFS= read -r item; do
+    profile_exists "$item" || printf '%s\n' "$item"
+  done < <(_profile_items "$1")
   return 0
 }

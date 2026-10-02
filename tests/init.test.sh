@@ -273,6 +273,14 @@ test_an_unknown_profile_stops_init_and_lists_the_valid_ones() {
   [ ! -e "$SANDBOX/appdata" ] || fail "appdata was created despite an unknown Profile"
 }
 
+test_an_unknown_profile_does_not_hide_the_other_errors() {
+  set_var COMPOSE_PROFILES "backup,transcod"
+  run_init
+  assert_status 1
+  assert_output_contains "transcod"
+  assert_output_contains "RESTIC_PASSWORD"
+}
+
 test_spaces_around_profile_names_are_ignored() {
   enable_profiles "vo, jackett"
   run_init

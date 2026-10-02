@@ -9,6 +9,9 @@ sudo scripts/init.sh    # checks what the Profiles need, creates their App data 
 docker compose up -d
 ```
 
+A name in `COMPOSE_PROFILES` that is not a Profile makes `scripts/init.sh` stop and list the
+valid ones, so a typo no longer leaves a service silently off.
+
 Turning a Profile off again (removing it from `COMPOSE_PROFILES`) leaves its App data in
 place. Stop its containers with `docker compose --profile <name> down <service>...` or
 `docker compose up -d --remove-orphans`.
