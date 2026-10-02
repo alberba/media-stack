@@ -6,6 +6,7 @@ set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 SETUP="$REPO/scripts/setup.sh"
 . "$REPO/tests/lib.sh"
+. "$REPO/scripts/lib/profiles.sh"
 
 setup() {
   SANDBOX="$(mktemp -d)"
@@ -40,7 +41,17 @@ run_setup() {
 
 # Answers for the paths section, then the ones every test starts a VPN with.
 PATHS=("/srv/app" "/srv/data" "Europe/Madrid" "" "")
-NO_PROFILES=(n n n n n n n n n n n)
+# answer_profiles NAME...: sets PROFILES_ANSWERS to y for those Profiles and n for the
+# rest, one per question and in the order the wizard asks them.
+answer_profiles() {
+  local profile
+  PROFILES_ANSWERS=()
+  for profile in $(profiles_all); do
+    if [[ " $* " == *" $profile "* ]]; then PROFILES_ANSWERS+=(y); else PROFILES_ANSWERS+=(n); fi
+  done
+}
+answer_profiles
+NO_PROFILES=("${PROFILES_ANSWERS[@]}")
 NO_TELEGRAM=("")
 # App connections: Jellyfin admin user and password, and the qualities (Enter keeps them),
 # then the two Jellyfin customizations (Enter = no).
@@ -123,16 +134,26 @@ test_no_port_forwarding_question_for_providers_without_it() {
   assert_file_contains "$ENV_FILE" "VPN_PORT_FORWARDING=off"
 }
 
+test_asks_about_every_profile_with_its_help() {
+  local profile
+  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
+  assert_status 0
+  for profile in $(profiles_all); do
+    assert_output_contains "  $profile: $(profile_help "$profile")?"
+  done
+}
+
 test_profiles_are_written_to_compose_profiles() {
-  # vo, remote and transcode on.
-  run_setup "${PATHS[@]}" cyberghost u p "" n y n n n n n n y n y \
+  answer_profiles vo remote transcode
+  run_setup "${PATHS[@]}" cyberghost u p "" "${PROFILES_ANSWERS[@]}" \
     n tskey "" "${APPS[@]}" "" n
   assert_status 0
   assert_file_contains "$ENV_FILE" "COMPOSE_PROFILES=vo,remote,transcode"
 }
 
 test_remote_profile_offers_the_detected_lan_subnet() {
-  run_setup "${PATHS[@]}" cyberghost u p "" n n n n n n n n y n n \
+  answer_profiles remote
+  run_setup "${PATHS[@]}" cyberghost u p "" "${PROFILES_ANSWERS[@]}" \
     n tskey "" "${APPS[@]}" ""
   assert_status 0
   assert_file_contains "$ENV_FILE" "TAILSCALE_AUTHKEY=tskey"
@@ -155,8 +176,8 @@ test_gpu_is_not_offered_without_dri() {
 }
 
 test_generates_the_secrets_the_chosen_profiles_need() {
-  # backup, dashboard, monitoring, extras on.
-  run_setup "${PATHS[@]}" cyberghost u p "" y n n n n y y n n y n \
+  answer_profiles backup dashboard monitoring extras
+  run_setup "${PATHS[@]}" cyberghost u p "" "${PROFILES_ANSWERS[@]}" \
     n "" "" "" "" "" "" "" "" "" "" ""
   assert_status 0
   local var
@@ -167,7 +188,8 @@ test_generates_the_secrets_the_chosen_profiles_need() {
 }
 
 test_proxy_profile_stores_the_domain() {
-  run_setup "${PATHS[@]}" cyberghost u p "" n n n n n n n y n n n \
+  answer_profiles proxy
+  run_setup "${PATHS[@]}" cyberghost u p "" "${PROFILES_ANSWERS[@]}" \
     n media.example.com "${APPS[@]}" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_file_contains "$ENV_FILE" "PROXY_DOMAIN=media.example.com"
@@ -194,7 +216,8 @@ test_generates_the_app_keys_and_the_qbittorrent_password() {
 }
 
 test_vo_profile_gets_its_keys_and_an_explanation() {
-  run_setup "${PATHS[@]}" cyberghost u p "" n y n n n n n n n n n n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
+  answer_profiles vo
+  run_setup "${PATHS[@]}" cyberghost u p "" "${PROFILES_ANSWERS[@]}" n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_contains "one Radarr/Sonarr cannot hold two copies"
   grep -qE "^RADARR_VO_API_KEY=[0-9a-f]{32}$" "$ENV_FILE" || fail "RADARR_VO_API_KEY was not generated"

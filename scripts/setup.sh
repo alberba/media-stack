@@ -14,21 +14,8 @@ EXAMPLE_FILE="${EXAMPLE_FILE:-$REPO/.env.example}"
 INIT_SCRIPT="${INIT_SCRIPT:-$REPO/scripts/init.sh}"
 DRI_DEVICE="${DRI_DEVICE:-/dev/dri}"
 
-# Profiles, in the order they are asked and written to COMPOSE_PROFILES.
-PROFILES=(backup vo jackett seeding cleanup dashboard monitoring proxy remote extras transcode)
-declare -A PROFILE_HELP=(
-  [backup]="nightly encrypted copy of the App data"
-  [vo]="second Radarr/Sonarr for an original-version library"
-  [jackett]="Jackett, for indexers Prowlarr lacks"
-  [seeding]="qui and cleanuparr, around qBittorrent"
-  [cleanup]="Maintainerr, removes library items by rules"
-  [dashboard]="Homarr and Dockge"
-  [monitoring]="Beszel and What's Up Docker"
-  [proxy]="Nginx Proxy Manager, HTTPS entry point from the internet"
-  [remote]="Tailscale"
-  [extras]="issue-automator, mousehole, Tor proxy, File Browser"
-  [transcode]="Tdarr server, for a Worker to transcode with"
-)
+# shellcheck source=lib/profiles.sh
+. "$REPO/scripts/lib/profiles.sh"
 
 # VPN provider data, checked against the gluetun image pinned in stacks/vpn/compose.yaml
 # (v3.41.3): its provider list and the config errors it reports at startup. Re-check it
@@ -60,6 +47,7 @@ QUALITY_DEFAULTS="Remux-2160p,Bluray-2160p,WEB 2160p,HDTV-2160p,Remux-1080p,Blur
 
 WORK=""
 EXISTING=0
+PROFILES_CHOSEN=""
 
 die() { echo "error: $*" >&2; exit 1; }
 
@@ -284,26 +272,25 @@ ask_vpn() {
 ask_profiles() {
   section "Profiles"
   echo "Optional groups of services on top of the Core (docs/profiles.md)."
-  PROFILES_ON=","
   local current profile default chosen=""
-  current=",$(get_env COMPOSE_PROFILES | tr -d '[:space:]'),"
-  for profile in "${PROFILES[@]}"; do
+  current="$(get_env COMPOSE_PROFILES)"
+  for profile in $(profiles_all); do
     default=n
-    if [[ "$current" == *",$profile,"* ]]; then default=y; fi
+    if profile_on "$profile" "$current"; then default=y; fi
     if [ "$profile" = vo ]; then
       echo "  vo keeps dubbed and original-version copies as separate files, each with its own"
       echo "  language rules: one Radarr/Sonarr cannot hold two copies of the same title. Only"
       echo "  say yes if you want both; if you watch in one language, one manager is enough."
     fi
-    if confirm "  $profile: ${PROFILE_HELP[$profile]}?" "$default"; then
+    if confirm "  $profile: $(profile_help "$profile")?" "$default"; then
       chosen+="${chosen:+,}$profile"
-      PROFILES_ON+="$profile,"
     fi
   done
+  PROFILES_CHOSEN="$chosen"
   set_env COMPOSE_PROFILES "$chosen"
 }
 
-profile_chosen() { [[ "$PROFILES_ON" == *",$1,"* ]]; }
+profile_chosen() { profile_on "$1" "$PROFILES_CHOSEN"; }
 
 ask_gpu() {
   section "Hardware transcoding"
