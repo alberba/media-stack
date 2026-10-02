@@ -51,9 +51,10 @@ rollback() {
   version="$(cat "$STATE/previous-version")"
   echo "Rollback to $version ($commit). App data is not restored; see docs/backup.md."
   git checkout --detach "$commit" || return
-  record "$version"
+  isolate_compose_env
   deploy || return
-  rm -f "$STATE/previous-commit" "$STATE/previous-version" "$STATE/pending"
+  record "$version"
+  rm -f "$STATE/previous-commit" "$STATE/previous-version" "$STATE/pending" "$STATE/attempted"
   echo 'Rollback verified.'
 }
 missing_settings() {
@@ -111,7 +112,8 @@ known_release() {
   return 1
 }
 infer() {
-  local exact
+  local exact release
+  local matches=()
   BASE=""
   if [ -f "$STATE/installed" ]; then BASE="$(cat "$STATE/installed")"; fi
   if [ -n "$ASSUME" ]; then
@@ -119,7 +121,8 @@ infer() {
     BASE="$ASSUME"
   elif [ -z "$BASE" ]; then
     git merge-base --is-ancestor HEAD origin/main || die 'Unknown/local history: specify --assume-version vX.Y.Z.'
-    BASE="$(git describe --tags --abbrev=0 --match 'v[0-9]*' HEAD 2>/dev/null || true)"
+    for release in "${RELEASES[@]}"; do matches+=(--match "$release"); done
+    BASE="$(git describe --tags --abbrev=0 "${matches[@]}" HEAD 2>/dev/null || true)"
     known_release "$BASE" || die 'No reachable release: specify --assume-version vX.Y.Z.'
   fi
   known_release "$BASE" || die "Recorded version $BASE is not a published stable release."
@@ -128,12 +131,27 @@ infer() {
   [ "$(git rev-parse HEAD)" = "$exact" ] || echo 'Instance runs an unreleased commit; using that release as the changelog base.'
 }
 apply_release() {
-  local release="$1"
+  local release="$1" previous="$2" notes
+  notes="$(git show "$release:docs/releases/$release.md")" || return
+  if [ "${release%%.*}" != "${previous%%.*}" ] || grep -qi '^Breaking changes: yes' <<< "$notes"; then
+    echo "Manual steps before $release:"
+    echo "$notes"
+    confirm "Have you completed $release's manual steps and accepted database rollback limits?" || return 1
+  fi
+  printf '%s\n' "$release" > "$STATE/attempted"
   git checkout --detach "$release" || return
-  record "$release"
+  isolate_compose_env
   missing_settings || return
   bash scripts/init.sh || return
-  deploy
+  deploy || return
+  record "$release"
+}
+isolate_compose_env() {
+  local key
+  while IFS= read -r key; do
+    unset "$key"
+  done < <(sed -nE 's/^[[:space:]]*(#[[:space:]]*)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' .env.example)
+  unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 }
 main() {
   while [ "$#" -gt 0 ]; do
@@ -150,15 +168,17 @@ main() {
     shift
   done
   [[ "$VERIFY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || die 'VERIFY_ATTEMPTS must be positive.'
+  [ "$DRY" = 0 ] || [ "$MODE" = upgrade ] || die '--dry-run is only supported for upgrades.'
   if [ "$MODE" = version ] && [ -f "$STATE/installed" ] && [ -z "$ASSUME" ]; then
     cat "$STATE/installed"; return
   fi
   clean
+  isolate_compose_env
   if [ "$MODE" = rollback ]; then rollback; return; fi
   fetch_releases
   infer
   if [ "$MODE" = version ]; then record "$BASE"; return; fi
-  local release start=0 found=0 notes previous_major major
+  local release start=0 found=0 notes previous
   TARGET="${TARGET:-${RELEASES[${#RELEASES[@]}-1]}}"
   known_release "$TARGET" || die "Target $TARGET is not a published stable release."
   PLAN=()
@@ -170,16 +190,13 @@ main() {
   [ "$found" = 1 ] || die 'Target is older than installed version; use --rollback.'
   echo 'Newer releases:'
   for release in "${PLAN[@]}"; do echo "$release"; done
-  BREAKING=0
-  previous_major="${BASE%%.*}"
+  previous="$BASE"
   for release in "${PLAN[@]}"; do
-    git merge-base --is-ancestor "$BASE" "$release" || die "Release $release is not a descendant of $BASE."
+    git merge-base --is-ancestor "$previous" "$release" || die "Release $release is not a descendant of $previous."
+    previous="$release"
     git merge-base --is-ancestor "$release" origin/main || die "Release $release is outside Template main."
     notes="$(git show "$release:docs/releases/$release.md")" || die "Missing notes for $release."
     echo "$notes"
-    major="${release%%.*}"
-    if [ "$major" != "$previous_major" ] || grep -qi '^Breaking changes: yes' <<< "$notes"; then BREAKING=1; fi
-    previous_major="$major"
     echo 'Settings added/changed:'
     git diff "$BASE" "$release" -- .env.example
   done
@@ -187,12 +204,9 @@ main() {
   [ "${#PLAN[@]}" -gt 0 ] || { record "$BASE"; echo 'Already at target.'; return; }
   [ -f "$ENV_FILE" ] || die 'No .env; run setup.sh first.'
   [ ! -f "$STATE/pending" ] || die 'An upgrade already has recovery state: run --rollback first.'
-  if [ "$BREAKING" = 1 ]; then
-    confirm 'Have you completed all breaking-change manual steps and accepted database rollback limits?' || die 'Upgrade cancelled.'
-  fi
-  local model
-  model="$(docker compose config --services)" || die 'Invalid installed Compose configuration.'
-  if grep -qx backup <<< "$model"; then
+  local enabled_services
+  enabled_services="$(docker compose config --services)" || die 'Invalid installed Compose configuration.'
+  if grep -qx backup <<< "$enabled_services"; then
     docker compose run --rm --build backup run || die 'Pre-upgrade backup failed; checkout unchanged.'
   else
     echo 'Backup Profile is off. Back up App data first: docs/backup.md (rollback restores code/images only).'
@@ -202,14 +216,16 @@ main() {
   printf '%s\n' "$BASE" > "$STATE/previous-version"
   touch "$STATE/pending"
   record "$BASE"
+  previous="$BASE"
   for release in "${PLAN[@]}"; do
-    if ! apply_release "$release"; then
+    if ! apply_release "$release" "$previous"; then
       echo "Upgrade failed at $release. Recovery: scripts/upgrade.sh --rollback" >&2
       if confirm 'Roll back code and images now?'; then rollback || echo 'Rollback failed; recovery state retained.' >&2; fi
       return 1
     fi
+    previous="$release"
   done
-  rm -f "$STATE/pending"
+  rm -f "$STATE/pending" "$STATE/attempted"
   echo "Upgrade verified: $TARGET. Previous checkout retained for --rollback."
 }
 main "$@"

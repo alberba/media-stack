@@ -14,7 +14,7 @@ setup() {
   git config user.name Test
   git config core.hooksPath /dev/null
   printf '.env\n' > .gitignore
-  printf 'COMPOSE_PROFILES=backup\nKEEP=original\n' > .env
+  printf 'APPDATA_ROOT=/tmp/app\nCOMPOSE_PROFILES=backup\nKEEP=original\n' > .env
   cp .env .env.example
   cat > scripts/init.sh <<'SCRIPT'
 #!/usr/bin/env bash
@@ -50,6 +50,8 @@ SCRIPT
   cat > "$SANDBOX/bin/docker" <<'SCRIPT'
 #!/usr/bin/env bash
 echo "$*" >> "$CALLS"
+[ -z "${APPDATA_ROOT+x}" ] || exit 52
+[ -z "${COMPOSE_FILE+x}" ] || exit 53
 if [[ "$*" == *'config --services'* ]]; then echo backup; fi
 if [[ "$*" == *'config --format json'* ]]; then echo '{"services":{"backup":{"profiles":["backup"]}}}'; fi
 [ "${DOCKER_FAIL:-}" != "$*" ]
@@ -108,6 +110,8 @@ test_verify_failure_offers_retryable_rollback() {
   assert_output_contains 'Upgrade failed at v1.1.0'
   assert_output_contains 'Roll back'
   [ -f .git/media-stack-upgrade/previous-commit ] || fail 'lost rollback state'
+  run_upgrade --version
+  assert_output_contains v1.0.0
   unset VERIFY_FAIL
   run_upgrade --rollback
   assert_status 0
@@ -128,9 +132,43 @@ test_breaking_changes_need_explicit_confirmation() {
   git add .; git commit -qm breaking; git tag -f v1.2.0 >/dev/null
   git push -q --force origin main refs/tags/v1.2.0
   git checkout -q --detach v1.0.0
-  OUTPUT="$(printf 'n\n' | scripts/upgrade.sh 2>&1)"; STATUS=$?
+  OUTPUT="$(printf 'n\ny\n\nn\nn\n' | scripts/upgrade.sh 2>&1)"; STATUS=$?
   assert_status 1
   assert_output_contains 'manual steps'
-  [ ! -s "$CALLS" ] || fail 'deployment happened without confirmation'
+  assert_file_contains "$CALLS" 'compose run --rm --build backup run'
+  assert_file_contains "$CALLS" 'init v1.1.0'
+  assert_file_not_contains "$CALLS" 'init v1.2.0'
+  [ "$(git describe --tags --exact-match)" = v1.1.0 ] || fail 'crossed breaking release without confirmation'
+}
+test_dry_run_cannot_apply_rollback() {
+  run_upgrade --rollback --dry-run
+  assert_status 1
+  assert_output_contains '--dry-run is only supported for upgrades'
+  [ ! -s "$CALLS" ] || fail 'dry-run ran Docker'
+}
+test_exported_settings_cannot_override_the_instance() {
+  export APPDATA_ROOT=/wrong COMPOSE_FILE=/wrong.yaml COMPOSE_PROFILES=extras
+  OUTPUT="$(printf 'n\ny\n\nn\ny\n\n' | scripts/upgrade.sh 2>&1)"; STATUS=$?
+  assert_status 0
+  assert_file_contains "$CALLS" 'compose run --rm --build backup run'
+}
+test_inference_ignores_unpublished_prerelease_tags() {
+  git checkout -q main
+  echo public > public.sh; git add public.sh; git commit -qm public
+  git tag v1.3.0-rc1
+  git push -q origin main refs/tags/v1.3.0-rc1
+  run_upgrade --dry-run
+  assert_status 0
+  assert_output_contains 'Installed: v1.2.0'
+  assert_output_contains 'unreleased commit'
+}
+test_next_upgrade_keeps_the_immediately_previous_release() {
+  OUTPUT="$(printf 'n\ny\n\n' | scripts/upgrade.sh v1.1.0 2>&1)"; STATUS=$?
+  assert_status 0
+  OUTPUT="$(printf 'n\ny\n\n' | scripts/upgrade.sh v1.2.0 2>&1)"; STATUS=$?
+  assert_status 0
+  run_upgrade --rollback
+  assert_status 0
+  [ "$(git describe --tags --exact-match)" = v1.1.0 ] || fail 'rollback skipped previous upgrade'
 }
 run_tests

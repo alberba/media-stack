@@ -3,6 +3,8 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
+# Root is needed by the init tests; trust only the selected Template clone.
+git() { command git -c safe.directory="$REPO" "$@"; }
 die() { echo "error: $*" >&2; exit 1; }
 [ "$#" = 1 ] || die 'Usage: scripts/release.sh vMAJOR.MINOR.PATCH'
 VERSION="$1"
@@ -26,7 +28,8 @@ trap 'rm -rf "$WORK"' EXIT
 sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > "$WORK/.env"
 sed -E 's/^([A-Z_]+)=$/\1=ci-dummy/' worker/.env.example > "$WORK/worker.env"
 # Explicit files and env files isolate validation from ignored Instance settings.
-unset COMPOSE_FILE COMPOSE_PROFILES
+while IFS= read -r key; do unset "$key"; done < <(sed -nE 's/^[[:space:]]*(#[[:space:]]*)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' .env.example)
+unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
 compose() { docker compose --project-directory "$REPO" --env-file "$WORK/.env" -f compose.yaml "$@"; }
 compose config --quiet
 PROFILES="$(compose config --profiles)"

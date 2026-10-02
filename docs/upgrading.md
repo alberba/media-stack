@@ -82,19 +82,21 @@ explicit `--assume-version vX.Y.Z`; without reachable releases, specify a base
 published release as well. This selects a changelog base, not a claim that the
 local code matches it. Keep a full clone, not a shallow clone.
 
-Read every intermediate release's manual steps. The script asks for explicit
-confirmation for breaking changes; perform those steps before confirming. With
-the backup Profile enabled it takes a backup before changing code. Otherwise it
-prints the backup instructions. Missing settings prompt to run the target
+Read every intermediate release's manual steps. With the backup Profile enabled,
+the script takes a backup before changing code
+or asking for manual steps. Otherwise it prints the backup instructions. It asks
+for explicit confirmation immediately before each breaking release; perform that
+release’s manual steps before confirming. Missing settings prompt to run the target
 `setup.sh` (current values are defaults) or fill just the missing variables.
 Only confirmed new settings are appended in the latter mode. init.sh runs at
 each intermediate release, followed by pull, build of local images, up and a
 bounded wait for verify.sh. Settings from intermediate releases are therefore
-processed even when jumping several versions. Do not export Compose settings
-that override .env while upgrading.
+processed even when jumping several versions. The script clears exported Template
+settings so Compose and init.sh both read .env.
 
-If an upgrade fails, its original checkout and the last applied release remain
-recorded. The script offers rollback and exits unsuccessfully even if rollback
+If an upgrade fails, its original checkout, attempted target and last verified
+release remain recorded. `--version` reports the last verified release. The script
+offers rollback and exits unsuccessfully even if rollback
 succeeds. You can also rerun `--rollback`. Rollback restores the previous code
 and images, rebuilds local images, and verifies the Instance; it preserves .env
 and all App data. A failed rollback keeps recovery state so it can be retried.
