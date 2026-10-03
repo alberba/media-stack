@@ -25,8 +25,9 @@ for heading in 'Images bumped' 'New settings' 'New Profiles' Fixes 'Manual steps
 done
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
-sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=ci-dummy/' .env.example > "$WORK/.env"
-sed -E 's/^([A-Z_]+)=$/\1=ci-dummy/' worker/.env.example > "$WORK/worker.env"
+python3 scripts/env_contract.py check || die 'Generated environment contract is out of date.'
+python3 scripts/env_contract.py fixture > "$WORK/.env"
+python3 scripts/env_contract.py fixture --scope worker > "$WORK/worker.env"
 # Explicit files and env files isolate validation from ignored Instance settings.
 while IFS= read -r key; do unset "$key"; done < <(sed -nE 's/^[[:space:]]*(#[[:space:]]*)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' .env.example)
 unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE

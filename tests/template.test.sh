@@ -32,16 +32,14 @@ SOCKET_WRITERS="dockge"
 
 setup() {
   SANDBOX="$(mktemp -d)"
-  # .env.example with every empty value filled, as an Operator would (BACKUP_SOURCE
-  # stays empty: it falls back to APPDATA_ROOT).
-  sed -E '/^(COMPOSE_PROFILES|BACKUP_SOURCE)=/!s/^([A-Z_]+)=$/\1=dummy/' "$REPO/.env.example" > "$SANDBOX/.env"
+  python3 "$REPO/scripts/env_contract.py" fixture > "$SANDBOX/.env"
 }
 teardown() { rm -rf "$SANDBOX"; }
 
 compose() { docker compose --project-directory "$REPO" --env-file "$SANDBOX/.env" "$@"; }
 # The Worker's own project, with worker/.env.example filled in the same way.
 worker_compose() {
-  sed -E 's/^([A-Z_]+)=$/\1=dummy/' "$REPO/worker/.env.example" > "$SANDBOX/worker.env"
+  python3 "$REPO/scripts/env_contract.py" fixture --scope worker > "$SANDBOX/worker.env"
   docker compose --project-directory "$REPO/worker" --env-file "$SANDBOX/worker.env" "$@"
 }
 
@@ -288,7 +286,9 @@ test_gitignore_blocks_instance_files() {
 
 test_gitignore_allows_template_files() {
   local path
-  for path in compose.yaml compose.gpu.yaml stacks/arr/compose.yaml .env.example scripts/init.sh scripts/lib/profiles.sh docs/install.md \
+  for path in compose.yaml compose.gpu.yaml stacks/arr/compose.yaml .env.example scripts/init.sh scripts/lib/profiles.sh \
+      scripts/env_contract.sh scripts/env_contract.py \
+      env/catalog.json env/instance.example.template env/worker.example.template docs/install.md \
       stacks/extras/issue-automator/Dockerfile stacks/extras/issue-automator/main.py stacks/extras/tor/Dockerfile \
       stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js worker/compose.yaml worker/.env.example \
       worker/Tdarr_Node_Config.windows.json.example \

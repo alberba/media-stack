@@ -1,0 +1,807 @@
+{
+  "APPDATA_ROOT": {
+    "scopes": {
+      "instance": {
+        "default": "/opt/media-stack/appdata",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_EXCLUDE": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_HOST": {
+    "scopes": {
+      "instance": {
+        "default": "media-stack",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_KEEP_DAILY": {
+    "scopes": {
+      "instance": {
+        "default": "7",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_KEEP_MONTHLY": {
+    "scopes": {
+      "instance": {
+        "default": "6",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_KEEP_WEEKLY": {
+    "scopes": {
+      "instance": {
+        "default": "4",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_SCHEDULE": {
+    "scopes": {
+      "instance": {
+        "default": "0 4 * * *",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BACKUP_SOURCE": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "exists_if": {
+          "profile": "backup"
+        },
+        "exists_hint": "the backup would be empty"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BAZARR_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "BAZARR_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://bazarr:6767"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "BESZEL_AGENT_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "BESZEL_AGENT_TOKEN": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "BESZEL_APP_URL": {
+    "scopes": {
+      "instance": {
+        "default": "http://localhost:8090",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "COMPOSE_FILE": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "COMPOSE_PROFILES": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "DATA_ROOT": {
+    "scopes": {
+      "instance": {
+        "default": "/srv/data",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "DOCKGE_STACKS_DIR": {
+    "scopes": {
+      "instance": {
+        "default": "/opt/stacks",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "HOMARR_SECRET_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "profile": "dashboard"
+        },
+        "pattern": "[0-9a-fA-F]{64}",
+        "pattern_description": "64 hex characters",
+        "hint": "generate it with 'openssl rand -hex 32'"
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "JELLYFIN_ABYSS": {
+    "scopes": {
+      "instance": {
+        "default": "off",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "JELLYFIN_ADMIN_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "JELLYFIN_ADMIN_USER": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "JELLYFIN_SEERR_REPORTER": {
+    "scopes": {
+      "instance": {
+        "default": "off",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "MEDIA_NETWORK": {
+    "scopes": {
+      "instance": {
+        "default": "media-network",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "MOUSEHOLE_ALLOWED_HOSTS": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "MOUSEHOLE_AUTH_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "profile": "extras"
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "OPENVPN_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "equals": {
+            "VPN_TYPE": "openvpn"
+          }
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "OPENVPN_USER": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "equals": {
+            "VPN_TYPE": "openvpn"
+          }
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "PGID": {
+    "scopes": {
+      "instance": {
+        "default": "1000",
+        "required": true
+      },
+      "worker": {
+        "default": "1000",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "PROWLARR_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "PROXY_DOMAIN": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "PUID": {
+    "scopes": {
+      "instance": {
+        "default": "1000",
+        "required": true
+      },
+      "worker": {
+        "default": "1000",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "QBITTORRENT_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "QBITTORRENT_USER": {
+    "scopes": {
+      "instance": {
+        "default": "admin",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "QUALITIES": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "RADARR_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "RADARR_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://radarr:7878"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "RADARR_VO_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "RADARR_VO_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://radarr-vo:7879"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "RENDER_GID": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "contains": {
+            "COMPOSE_FILE": "compose.gpu.yaml"
+          }
+        },
+        "pattern": "[0-9]+",
+        "pattern_description": "the host's render group id for compose.gpu.yaml"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "RESTIC_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "profile": "backup"
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "RESTIC_REPOSITORY": {
+    "scopes": {
+      "instance": {
+        "default": "rclone:gdrive:media-stack",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SEERR_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "SEERR_RADARR_VO_SERVER_ID": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SEERR_SONARR_VO_SERVER_ID": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SEERR_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://seerr:5055"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SONARR_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "SONARR_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://sonarr:8989"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SONARR_VO_API_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": true
+  },
+  "SONARR_VO_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "compose_default": "http://sonarr-vo:8990"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TAILSCALE_AUTHKEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "profile": "remote"
+        },
+        "unless_file": {
+          "root": "APPDATA_ROOT",
+          "path": "tailscale/tailscaled.state"
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "TAILSCALE_HOSTNAME": {
+    "scopes": {
+      "instance": {
+        "default": "media-stack",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TAILSCALE_ROUTES": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "items_pattern": "[0-9a-fA-F:.]+/[0-9]{1,3}",
+        "items_if": {
+          "profile": "remote"
+        },
+        "items_description": "a subnet"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TDARR_API_KEY": {
+    "scopes": {
+      "worker": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "TDARR_NODE_NAME": {
+    "scopes": {
+      "worker": {
+        "default": "",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TDARR_SERVER_IP": {
+    "scopes": {
+      "worker": {
+        "default": "",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TELEGRAM_BOT_TOKEN": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "TELEGRAM_CHAT_ID": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "TZ": {
+    "scopes": {
+      "instance": {
+        "default": "Etc/UTC",
+        "required": true
+      },
+      "worker": {
+        "default": "Etc/UTC",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "VPN_OUTBOUND_SUBNETS": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "VPN_PORT_FORWARDING": {
+    "scopes": {
+      "instance": {
+        "default": "off",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": true
+  },
+  "VPN_PORT_FORWARDING_PROVIDER": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "VPN_SERVER_COUNTRIES": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "VPN_SERVICE_PROVIDER": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "VPN_TYPE": {
+    "scopes": {
+      "instance": {
+        "default": "wireguard",
+        "required": true,
+        "choices": [
+          "wireguard",
+          "openvpn"
+        ]
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WIREGUARD_ADDRESSES": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WIREGUARD_PRESHARED_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "WIREGUARD_PRIVATE_KEY": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "equals": {
+            "VPN_TYPE": "wireguard"
+          }
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "WORKER_CACHE": {
+    "scopes": {
+      "worker": {
+        "default": "/var/cache/tdarr",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WORKER_DATA": {
+    "scopes": {
+      "worker": {
+        "default": "/opt/tdarr-node",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WORKER_LIBRARY": {
+    "scopes": {
+      "worker": {
+        "default": "/mnt/media-stack/media",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WUD_ADMIN_PASSWORD": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "required_if": {
+          "profile": "monitoring"
+        }
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "WUD_ADMIN_USER": {
+    "scopes": {
+      "instance": {
+        "default": "admin",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WUD_CRON": {
+    "scopes": {
+      "instance": {
+        "default": "0 5 * * *",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  }
+}

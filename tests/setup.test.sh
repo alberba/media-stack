@@ -288,7 +288,7 @@ test_declining_the_hand_off_prints_the_command() {
   run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_not_contains "init ran"
-  assert_output_contains "sudo scripts/init.sh"
+  assert_output_contains "scripts/init.sh"
 }
 
 test_rerun_offers_current_values_and_keeps_the_rest() {
@@ -317,6 +317,51 @@ EOF
   assert_file_contains "$ENV_FILE" "COMPOSE_PROFILES=vo,extras"
   assert_file_contains "$ENV_FILE" "MOUSEHOLE_AUTH_PASSWORD=keepme"
   assert_file_contains "$ENV_FILE" "BESZEL_APP_URL=http://x:8090"
+}
+
+test_rerun_reads_compose_escaped_password() {
+  cat > "$ENV_FILE" <<'EOF'
+APPDATA_ROOT=/old/app
+DATA_ROOT=/old/data
+PUID=1000
+PGID=1000
+TZ=Etc/UTC
+VPN_SERVICE_PROVIDER=cyberghost
+VPN_TYPE=openvpn
+OPENVPN_USER=me
+OPENVPN_PASSWORD="pa\"ss"
+COMPOSE_PROFILES=
+EOF
+  run_setup "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ""
+  assert_status 0
+  [ "$(python3 "$REPO/scripts/env_contract.py" get --file "$ENV_FILE" --name OPENVPN_PASSWORD)" = 'pa"ss' ] || fail "the existing password changed"
+}
+
+test_rerun_recomputes_interpolated_paths_after_an_answer() {
+  cat > "$ENV_FILE" <<'EOF'
+APPDATA_ROOT=/old/app
+DATA_ROOT=${APPDATA_ROOT}/data
+PUID=1000
+PGID=1000
+TZ=Etc/UTC
+VPN_SERVICE_PROVIDER=cyberghost
+VPN_TYPE=openvpn
+OPENVPN_USER=me
+OPENVPN_PASSWORD=secret
+COMPOSE_PROFILES=
+EOF
+  run_setup "/new/app" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" "" ""
+  assert_status 0
+  assert_file_contains "$ENV_FILE" "DATA_ROOT=/new/app/data"
+}
+
+test_shell_override_warning_hides_a_secret_before_writing() {
+  export OPENVPN_PASSWORD=externalsecret
+  run_setup "${PATHS[@]}" cyberghost me file-secret "" "${NO_PROFILES[@]}" n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
+  assert_status 0
+  assert_output_contains "OPENVPN_PASSWORD: shell overrides $ENV_FILE (secret value hidden)"
+  assert_output_not_contains "externalsecret"
+  assert_file_contains "$ENV_FILE" "OPENVPN_PASSWORD=file-secret"
 }
 
 test_rerun_saves_a_backup_of_the_previous_env() {
