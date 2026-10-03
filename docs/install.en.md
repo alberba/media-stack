@@ -10,6 +10,7 @@ and read the [security checklist](security.en.md) before exposing anything.
 - **Linux** (any distribution; a NAS with Docker works). Windows and macOS are not
   supported: gluetun needs `/dev/net/tun` and hardlinks need a Linux filesystem.
 - **Docker Engine** with **Compose 2.20** or newer (`docker compose version`).
+- **Python 3.7** or newer on the host (`python3 --version`), with no additional packages.
 - `/dev/net/tun` on the host (`ls -l /dev/net/tun`).
 - A **VPN account** with a provider [gluetun supports](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers),
   and its WireGuard key or OpenVPN credentials.
@@ -33,7 +34,7 @@ scripts/verify.sh         # every service healthy, qBittorrent egress IP is the 
    it offers the current values as defaults and keeps what it does not ask about.
 2. **`docker compose up -d`** starts the Core and the Profiles in `COMPOSE_PROFILES`, and
    the `wire` container [wires the apps](wiring.en.md) to each other.
-3. **`scripts/verify.sh`** checks, a minute or two after starting, that every Core service is healthy, that `wire` wired the apps, and that
+3. **`scripts/verify.sh`** checks, a minute or two after starting, that every Core service and active `vo` service is healthy, that `wire-seed` and `wire` completed successfully, and that
    qBittorrent's public IP is the VPN's, not yours.
 
 Without the wizard: copy `.env.example` to `.env`, fill it in, and run `scripts/init.sh`.

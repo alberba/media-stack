@@ -17,6 +17,7 @@ import urllib.parse
 import urllib.request
 
 from .api import Client
+from .config import TOPOLOGY
 
 # renovate: datasource=github-releases depName=AumGupta/abyss-jellyfin
 ABYSS_VERSION = "v1.2.3"
@@ -178,7 +179,7 @@ def configure_reporter(client, cfg):
     conf = client.get(path)
     if conf.get("ApiKey"):
         return []
-    conf.update({"SeerrUrl": "http://seerr:5055", "ApiKey": cfg["seerr_key"]})
+    conf.update({"SeerrUrl": TOPOLOGY.url("jellyfin", "seerr"), "ApiKey": cfg["seerr_key"]})
     client.post(path, conf)
     return ["jellyfin: Seerr Reporter pointed at Seerr"]
 

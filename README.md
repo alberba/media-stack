@@ -71,7 +71,7 @@ es un override, `compose.gpu.yaml`, que se activa con `COMPOSE_FILE` en `.env`.
 
 ## Inicio rápido
 
-Requisitos: **Linux**, Docker Engine con Compose 2.20 o superior, `/dev/net/tun` y una
+Requisitos: **Linux**, Docker Engine con Compose 2.20 o superior, Python 3.7 o superior, `/dev/net/tun` y una
 cuenta de VPN. Windows y macOS no están soportados.
 
 ```sh
@@ -113,6 +113,7 @@ una lista blanca, y gitleaks revisa cada commit y cada push.
 ```sh
 git config core.hooksPath .githooks   # hook pre-commit de gitleaks (gitleaks o Docker)
 tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
+tests/topology.test.sh && tests/wire.test.sh   # resolución de direcciones y conexiones entre apps
 tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # necesitan python3, y node o Docker
 tests/backup.test.sh && tests/backup-image.test.sh   # necesitan sqlite3 y Docker
 ```

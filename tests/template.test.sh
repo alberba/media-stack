@@ -8,13 +8,18 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 . "$REPO/tests/lib.sh"
 . "$REPO/scripts/lib/profiles.sh"
 
-CORE_SERVICES="bazarr flaresolverr gluetun jellyfin prowlarr qbittorrent radarr seerr sonarr wire wire-seed"
-BEHIND_VPN="bazarr flaresolverr prowlarr qbittorrent radarr sonarr"
+TOPOLOGY="$REPO/stacks/wire/wire/topology.py"
+CORE_SERVICES="$(python3 -B "$TOPOLOGY" services | sort | xargs)" || exit 1
+BEHIND_VPN="$(PYTHONPATH="$REPO/stacks/wire" python3 -B -c '
+from wire.topology import load
+print(" ".join(s["key"] for s in load().active() if s["namespace"] != s["key"] and s["namespace"] != "none"))')" || exit 1
 
 # What each Profile adds on top of the Core.
 declare -A PROFILE_SERVICES=(
   [backup]="backup"
-  [vo]="radarr-vo sonarr-vo"
+  [vo]="$(PYTHONPATH="$REPO/stacks/wire" python3 -B -c '
+from wire.topology import load
+print(" ".join(s["key"] for s in load().active({"vo"}) if s.get("profile") == "vo"))')"
   [jackett]="jackett"
   [seeding]="cleanuparr qui"
   [cleanup]="maintainerr"
@@ -26,7 +31,7 @@ declare -A PROFILE_SERVICES=(
   [transcode]="tdarr"
 )
 # Profile services that talk to trackers or indexers, and the port gluetun publishes for each.
-declare -A VPN_PORTS=([radarr-vo]=7879 [sonarr-vo]=8990 [jackett]=9117 [mousehole]=5010)
+declare -A VPN_PORTS=([jackett]=9117 [mousehole]=5010)
 # The only service that needs to write through the Docker socket (it manages stacks).
 SOCKET_WRITERS="dockge"
 
@@ -138,11 +143,14 @@ test_profile_services_that_reach_trackers_go_through_the_vpn() {
   done
 }
 
-test_vo_managers_listen_on_their_own_ports() {
-  local json
-  json="$(all_profiles_json)"
-  [ "$(query 's["radarr-vo"]["environment"]["RADARR__SERVER__PORT"]' <<< "$json")" = 7879 ] || fail "radarr-vo does not listen on 7879"
-  [ "$(query 's["sonarr-vo"]["environment"]["SONARR__SERVER__PORT"]' <<< "$json")" = 8990 ] || fail "sonarr-vo does not listen on 8990"
+test_core_and_vo_compose_match_the_shared_topology() {
+  local profile json data_root
+  data_root="$(sed -n 's/^DATA_ROOT=//p' "$SANDBOX/.env")"
+  for profile in '' vo; do
+    json="$(COMPOSE_PROFILES="$profile" compose config --format json)" || fail "could not resolve Compose"
+    python3 -B "$REPO/tests/topology-compose.py" --profiles "$profile" --data-root "$data_root" <<< "$json" \
+      || fail "Compose disagrees with the shared topology ($profile)"
+  done
 }
 
 test_docker_socket_is_read_only_unless_write_is_needed() {
@@ -293,7 +301,8 @@ test_gitignore_allows_template_files() {
       stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js worker/compose.yaml worker/.env.example \
       worker/Tdarr_Node_Config.windows.json.example \
       stacks/backup/Dockerfile stacks/backup/media-backup.sh docs/backup.en.md \
-      tests/lib.sh .github/workflows/ci.yml .githooks/pre-commit README.md LICENSE renovate.json \
+      tests/lib.sh tests/topology-compose.py stacks/wire/wire/topology.json stacks/wire/wire/topology.py \
+      .github/workflows/ci.yml .githooks/pre-commit README.md LICENSE renovate.json \
       .gitleaks.toml .gitignore; do
     gitignored "$path" && fail "$path is ignored"
   done

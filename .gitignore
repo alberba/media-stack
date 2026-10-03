@@ -21,6 +21,7 @@
 # Services built locally: one folder per image inside its stack.
 !/stacks/*/*/Dockerfile
 !/stacks/*/*/*.py
+!/stacks/wire/wire/topology.json
 !/stacks/transcode/plugins/*.js
 # The Worker: its own compose project, run on the Worker, not on the Instance.
 !/worker/compose.yaml
@@ -31,6 +32,7 @@
 !/env/catalog.json
 !/env/*.template
 !/tests/*.sh
+!/tests/topology-compose.py
 !/docs/**/*.md
 !/examples/**/*.example
 !/examples/**/*.md

@@ -22,8 +22,8 @@ DEFAULT_NETWORK="media-network"
 APPDATA_DIRS=(gluetun qbittorrent prowlarr radarr sonarr bazarr jellyfin/config jellyfin/cache jellyfin/ui wire)
 # Seerr runs as the image's fixed `node` user.
 SEERR_OWNER="1000:1000"
-# TRaSH-style layout: downloads and library on the same filesystem, so imports are hardlinks.
-DATA_DIRS=(torrents/movies torrents/tv media/movies media/tv)
+TOPOLOGY="$REPO/stacks/wire/wire/topology.py"
+DATA_LAYOUT=""
 
 errors=()
 declare -A EFFECTIVE_ENV=()
@@ -61,6 +61,14 @@ check_compose() {
   fi
   version_ge "$version" "$MIN_COMPOSE" \
     || add_error "Docker Compose $version is too old: $MIN_COMPOSE or newer is needed (for 'include')."
+}
+
+check_topology() {
+  if ! command -v python3 >/dev/null; then
+    add_error "Python 3 not found. Install python3 on the host for preparation and verification."
+  elif ! DATA_LAYOUT="$(python3 -B "$TOPOLOGY" folders --profiles "$(env_get COMPOSE_PROFILES)" 2>&1)"; then
+    add_error "$DATA_LAYOUT"
+  fi
 }
 
 check_tun() {
@@ -146,7 +154,10 @@ prepare_folders() {
   done
 
   root="$(env_get DATA_ROOT)"
-  for dir in "${DATA_DIRS[@]}"; do make_owned_dir "$root/$dir" "$owner"; done
+  while IFS= read -r dir; do
+    [ -n "$dir" ] || continue
+    make_owned_dir "$root/$dir" "$owner"
+  done <<< "$DATA_LAYOUT"
   echo "App data ready in $(env_get APPDATA_ROOT), library layout ready in $root."
 }
 
@@ -174,6 +185,7 @@ main() {
   if ! python3 "$REPO/scripts/env_contract.py" validate --file "$ENV_FILE"; then
     add_error "Invalid Instance settings."
   fi
+  check_topology
   if [ "${#errors[@]}" -gt 0 ]; then
     printf 'error: %s\n' "${errors[@]}" >&2
     exit 1

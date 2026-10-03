@@ -78,6 +78,14 @@ test_shell_override_matches_compose_precedence() {
   assert_owner "$SANDBOX/appdata/radarr" "4321:5678"
 }
 
+test_topology_uses_the_effective_profile_override() {
+  COMPOSE_PROFILES=vo run_init
+  assert_status 0
+  assert_dir "$SANDBOX/data/media/movies-vo"
+  assert_dir "$SANDBOX/data/torrents/movies-vo"
+  assert_owner "$SANDBOX/data/media/movies-vo" "1234:5678"
+}
+
 test_fails_without_env_file() {
   rm "$ENV_FILE"
   run_init
@@ -188,6 +196,40 @@ test_creates_data_layout_for_hardlinks() {
     assert_dir "$SANDBOX/data/$dir"
     assert_owner "$SANDBOX/data/$dir" "1234:5678"
   done
+}
+
+test_vo_prepares_its_library_and_download_folders() {
+  set_var COMPOSE_PROFILES vo
+  run_init
+  assert_status 0
+  for dir in media/movies-vo media/tv-vo torrents/movies-vo torrents/tv-vo; do
+    assert_dir "$SANDBOX/data/$dir"
+    assert_owner "$SANDBOX/data/$dir" "1234:5678"
+  done
+}
+
+test_does_not_prepare_vo_folders_when_disabled() {
+  run_init
+  assert_status 0
+  [ ! -e "$SANDBOX/data/media/movies-vo" ] || fail "VO library created without its Profile"
+  [ ! -e "$SANDBOX/data/torrents/movies-vo" ] || fail "VO downloads created without their Profile"
+}
+
+test_invalid_topology_stops_init_before_side_effects() {
+  local checkout="$SANDBOX/checkout"
+  mkdir -p "$checkout/scripts/lib" "$checkout/stacks/wire/wire" "$checkout/env"
+  cp "$INIT" "$checkout/scripts/init.sh"
+  cp "$REPO/scripts/env_contract.sh" "$REPO/scripts/env_contract.py" "$checkout/scripts/"
+  cp "$REPO/env/catalog.json" "$checkout/env/"
+  cp "$REPO/scripts/lib/profiles.sh" "$checkout/scripts/lib/"
+  cp "$REPO/stacks/wire/wire/topology.py" "$checkout/stacks/wire/wire/"
+  printf '{"services": []}\n' > "$checkout/stacks/wire/wire/topology.json"
+  OUTPUT="$("$checkout/scripts/init.sh" 2>&1)"; STATUS=$?
+  assert_status 1
+  assert_output_contains "topology"
+  [ ! -e "$SANDBOX/appdata" ] || fail "appdata created with invalid topology"
+  [ ! -e "$SANDBOX/data" ] || fail "library created with invalid topology"
+  assert_file_not_contains "$FAKE_DOCKER_LOG" "network create"
 }
 
 test_creates_shared_network_when_missing() {
