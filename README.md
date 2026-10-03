@@ -97,7 +97,9 @@ compose.gpu.yaml        override opcional: GPU del host para Jellyfin y Tdarr
 stacks/<stack>/         un compose por stack (Núcleo o Perfil)
 worker/                 nodo Tdarr para un Worker Linux, y la config del nodo Windows
 scripts/setup.sh        asistente interactivo que escribe .env
-scripts/init.sh         comprobaciones del host + carpetas + red
+scripts/init.sh         validación del .env + comprobaciones del host + carpetas + red
+env/catalog.json        contrato de variables de la Instancia y el Worker
+scripts/env_contract.py lectura con Compose, validación y generación de ejemplos
 scripts/verify.sh       comprobación de salud y de la VPN tras arrancar
 docs/                   guías (.md en español, .en.md en inglés)
 .env.example            todos los ajustes, comentados

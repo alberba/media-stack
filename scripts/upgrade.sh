@@ -3,7 +3,7 @@
 set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
-# sudo is needed by init.sh; trust only this explicitly selected clone.
+# Upgrade changes checked-out releases and App data; trust only this selected clone.
 git() { command git -c safe.directory="$REPO" "$@"; }
 STATE="$(git rev-parse --absolute-git-dir)/media-stack-upgrade"
 API=https://api.github.com/repos/alberba/media-stack/releases
@@ -71,15 +71,12 @@ missing_settings() {
   else
     confirm 'Fill only the missing settings now?' || return 1
     for key in "${missing[@]}"; do
-      line="$(grep -E "^$key=" .env.example | tail -n 1)"
       printf '%s (Enter keeps example default): ' "$key"
       IFS= read -r value || return 1
-      # Store a literal Compose value, never execute shell input.
-      if [ -n "$value" ]; then
-        [[ "$value" != *\'* ]] || { echo 'Single quotes are not supported here; use setup.sh.' >&2; return 1; }
-        line="$key='$value'"
+      if [ -z "$value" ]; then
+        value="$(python3 scripts/env_contract.py get --file .env.example --name "$key")" || return 1
       fi
-      printf '\n%s\n' "$line" >> "$ENV_FILE"
+      printf '%s' "$value" | python3 scripts/env_contract.py set --file "$ENV_FILE" --name "$key" || return 1
     done
   fi
   for key in "${missing[@]}"; do

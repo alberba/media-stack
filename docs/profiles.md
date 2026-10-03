@@ -5,7 +5,7 @@ listing them in `COMPOSE_PROFILES` in `.env`, fill in the variables of their sec
 `.env`, then:
 
 ```sh
-sudo scripts/init.sh    # checks what the Profiles need, creates their App data folders
+scripts/init.sh         # checks what the Profiles need, creates their App data folders
 docker compose up -d
 ```
 

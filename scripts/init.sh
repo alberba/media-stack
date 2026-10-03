@@ -6,14 +6,16 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
+. "$REPO/scripts/env_contract.sh"
 ENV_FILE="${ENV_FILE:-$REPO/.env}"
 TUN_DEVICE="${TUN_DEVICE:-/dev/net/tun}"
 MIN_COMPOSE="2.20.0"
+ENV_VALUES_TEMP=""
+trap 'rm -f "${ENV_VALUES_TEMP:-}"' EXIT
 
 # shellcheck source=scripts/lib/profiles.sh
 . "$REPO/scripts/lib/profiles.sh"
 
-REQUIRED_VARS=(APPDATA_ROOT DATA_ROOT PUID PGID TZ VPN_SERVICE_PROVIDER VPN_TYPE)
 DEFAULT_NETWORK="media-network"
 
 # Folders under APPDATA_ROOT owned by PUID:PGID.
@@ -24,27 +26,13 @@ TOPOLOGY="$REPO/stacks/wire/wire/topology.py"
 DATA_LAYOUT=""
 
 errors=()
+declare -A EFFECTIVE_ENV=()
 add_error() { errors+=("$1"); }
 
-# Reads KEY=value lines from the .env without executing it.
-load_env() {
-  local line key value
-  while IFS= read -r line || [ -n "$line" ]; do
-    [[ "$line" =~ ^[[:space:]]*(#|$) ]] && continue
-    [[ "$line" =~ ^[[:space:]]*([A-Za-z_][A-Za-z0-9_]*)=(.*)$ ]] || continue
-    key="${BASH_REMATCH[1]}"
-    value="${BASH_REMATCH[2]}"
-    if [[ "$value" =~ ^\"([^\"]*)\" || "$value" =~ ^\'([^\']*)\' ]]; then
-      value="${BASH_REMATCH[1]}"
-    else
-      value="${value%%[[:space:]]#*}"
-      value="${value%"${value##*[![:space:]]}"}"
-    fi
-    printf -v "ENV_$key" '%s' "$value"
-  done < "$ENV_FILE"
-}
+# Compose resolves .env quoting, interpolation and shell overrides for every setting.
+load_env() { env_contract_load EFFECTIVE_ENV "$ENV_FILE"; }
 
-env_get() { local name="ENV_$1"; printf '%s' "${!name:-}"; }
+env_get() { printf '%s' "${EFFECTIVE_ENV[$1]:-}"; }
 
 # True when Profile $1 is listed in the .env's COMPOSE_PROFILES.
 profile_enabled() { profile_on "$1" "$(env_get COMPOSE_PROFILES)"; }
@@ -86,33 +74,6 @@ check_topology() {
 check_tun() {
   [ -e "$TUN_DEVICE" ] \
     || add_error "$TUN_DEVICE not found: the VPN gateway needs it. Load the module with 'modprobe tun'."
-}
-
-check_root() {
-  [ "$(id -u)" = 0 ] || add_error "Run as root (sudo scripts/init.sh): it sets folder owners with chown."
-}
-
-check_vars() {
-  local var
-  for var in "${REQUIRED_VARS[@]}"; do
-    [ -n "$(env_get "$var")" ] || add_error "$var is empty in $ENV_FILE."
-  done
-  case "$(env_get VPN_TYPE)" in
-    wireguard)
-      [ -n "$(env_get WIREGUARD_PRIVATE_KEY)" ] || add_error "WIREGUARD_PRIVATE_KEY is empty (needed with VPN_TYPE=wireguard)."
-      ;;
-    openvpn)
-      [ -n "$(env_get OPENVPN_USER)" ] || add_error "OPENVPN_USER is empty (needed with VPN_TYPE=openvpn)."
-      [ -n "$(env_get OPENVPN_PASSWORD)" ] || add_error "OPENVPN_PASSWORD is empty (needed with VPN_TYPE=openvpn)."
-      ;;
-    "") ;;
-    *) add_error "VPN_TYPE must be 'wireguard' or 'openvpn', got '$(env_get VPN_TYPE)'." ;;
-  esac
-  check_profiles
-  if [[ "$(env_get COMPOSE_FILE)" == *compose.gpu.yaml* ]]; then
-    [[ "$(env_get RENDER_GID)" =~ ^[0-9]+$ ]] \
-      || add_error "RENDER_GID must be the host's render group id for compose.gpu.yaml: see 'getent group render'."
-  fi
 }
 
 # One setting a Profile requires. Most only need a value; two have rules of their own.
@@ -162,12 +123,16 @@ check_profiles() {
   fi
 }
 
+run_as_root() {
+  if [ "$(id -u)" = 0 ]; then "$@"; else sudo "$@"; fi
+}
+
 # Creates a folder a service writes to and gives it to its owner. Parent folders
 # (APPDATA_ROOT, DATA_ROOT...) are created if missing but their owner is left alone.
 make_owned_dir() {
   local dir="$1" owner="$2"
-  mkdir -p "$dir"
-  chown "$owner" "$dir"
+  run_as_root mkdir -p "$dir"
+  run_as_root chown "$owner" "$dir"
 }
 
 prepare_folders() {
@@ -183,7 +148,7 @@ prepare_folders() {
       case "$kind" in
         app) make_owned_dir "$root/$dir" "$owner" ;;
         root) make_owned_dir "$root/$dir" "0:0" ;;
-        private) make_owned_dir "$root/$dir" "0:0"; chmod 700 "$root/$dir" ;;
+        private) make_owned_dir "$root/$dir" "0:0"; run_as_root chmod 700 "$root/$dir" ;;
       esac
     done < <(profile_dirs "$profile")
   done
@@ -213,11 +178,13 @@ main() {
     echo "No $ENV_FILE found. Copy .env.example to .env and fill it in first." >&2
     exit 1
   fi
-  load_env
-  check_root
+  load_env || exit 1
   check_compose
   check_tun
-  check_vars
+  check_profiles
+  if ! python3 "$REPO/scripts/env_contract.py" validate --file "$ENV_FILE"; then
+    add_error "Invalid Instance settings."
+  fi
   check_topology
   if [ "${#errors[@]}" -gt 0 ]; then
     printf 'error: %s\n' "${errors[@]}" >&2
@@ -226,6 +193,9 @@ main() {
   prepare_folders
   prepare_network
   echo "Done. Start the Instance with: docker compose up -d"
+  if [ "$ENV_FILE" != "$REPO/.env" ]; then
+    echo "For this .env: docker compose --env-file '$ENV_FILE' up -d"
+  fi
 }
 
 main "$@"

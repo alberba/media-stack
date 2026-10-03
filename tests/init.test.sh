@@ -23,6 +23,7 @@ setup() {
 echo "$*" >> "$FAKE_DOCKER_LOG"
 case "$*" in
   "compose version --short") echo "$FAKE_COMPOSE_VERSION" ;;
+  "compose --project-directory"*) exec /usr/bin/docker "$@" ;;
   "network inspect"*) [ "$FAKE_NETWORK_EXISTS" = 1 ] ;;
   "network create"*) exit 0 ;;
   *) exit 0 ;;
@@ -71,6 +72,20 @@ test_succeeds_with_a_valid_env() {
   assert_status 0
 }
 
+test_shell_override_matches_compose_precedence() {
+  PUID=4321 run_init
+  assert_status 0
+  assert_owner "$SANDBOX/appdata/radarr" "4321:5678"
+}
+
+test_topology_uses_the_effective_profile_override() {
+  COMPOSE_PROFILES=vo run_init
+  assert_status 0
+  assert_dir "$SANDBOX/data/media/movies-vo"
+  assert_dir "$SANDBOX/data/torrents/movies-vo"
+  assert_owner "$SANDBOX/data/media/movies-vo" "1234:5678"
+}
+
 test_fails_without_env_file() {
   rm "$ENV_FILE"
   run_init
@@ -110,10 +125,9 @@ test_fails_when_a_required_variable_is_empty() {
   assert_output_contains "TZ"
 }
 
-test_fails_when_not_root() {
+test_runs_without_root_and_elevates_folder_changes() {
   FAKE_UID=1000 run_init
-  assert_status 1
-  assert_output_contains "sudo"
+  assert_status 0
 }
 
 test_media_network_defaults_when_empty() {
@@ -203,8 +217,10 @@ test_does_not_prepare_vo_folders_when_disabled() {
 
 test_invalid_topology_stops_init_before_side_effects() {
   local checkout="$SANDBOX/checkout"
-  mkdir -p "$checkout/scripts/lib" "$checkout/stacks/wire/wire"
+  mkdir -p "$checkout/scripts/lib" "$checkout/stacks/wire/wire" "$checkout/env"
   cp "$INIT" "$checkout/scripts/init.sh"
+  cp "$REPO/scripts/env_contract.sh" "$REPO/scripts/env_contract.py" "$checkout/scripts/"
+  cp "$REPO/env/catalog.json" "$checkout/env/"
   cp "$REPO/scripts/lib/profiles.sh" "$checkout/scripts/lib/"
   cp "$REPO/stacks/wire/wire/topology.py" "$checkout/stacks/wire/wire/"
   printf '{"services": []}\n' > "$checkout/stacks/wire/wire/topology.json"

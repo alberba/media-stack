@@ -29,7 +29,7 @@ scripts/verify.sh         # every service healthy, qBittorrent egress IP is the 
 1. **`scripts/setup.sh`** asks for the paths, `PUID`/`PGID` (`id -u`, `id -g`), time zone,
    VPN provider and credentials, which Profiles to turn on, the Jellyfin admin and the
    qualities to download, and generates the apps' API keys. It writes `.env` and
-   offers to run `sudo scripts/init.sh`, which checks the host, creates the folders
+   offers to run `scripts/init.sh`, which checks the host, creates the folders
    under `DATA_ROOT` and `APPDATA_ROOT` and the Docker network. Run it again at any time:
    it offers the current values as defaults and keeps what it does not ask about.
 2. **`docker compose up -d`** starts the Core and the Profiles in `COMPOSE_PROFILES`, and
@@ -37,7 +37,11 @@ scripts/verify.sh         # every service healthy, qBittorrent egress IP is the 
 3. **`scripts/verify.sh`** checks, a minute or two after starting, that every Core service and active `vo` service is healthy, that `wire-seed` and `wire` completed successfully, and that
    qBittorrent's public IP is the VPN's, not yours.
 
-Without the wizard: copy `.env.example` to `.env`, fill it in, and run `sudo scripts/init.sh`.
+Without the wizard: copy `.env.example` to `.env`, fill it in, and run `scripts/init.sh`.
+It checks the same effective values that Compose uses, including exported shell variables,
+and requests elevated privileges only while preparing folders. For a different file, run
+`ENV_FILE=/path/to/instance.env scripts/init.sh`, then use the `--env-file` Compose command
+that `init.sh` prints.
 
 Hardware transcoding with the host's GPU: set `COMPOSE_FILE=compose.yaml:compose.gpu.yaml`
 and `RENDER_GID` in `.env` (see `.env.example`).

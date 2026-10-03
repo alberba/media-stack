@@ -48,7 +48,7 @@ TELEGRAM_BOT_TOKEN=...           # opcional: reutiliza el bot que ya uses para a
 TELEGRAM_CHAT_ID=...
 ```
 
-Después vuelve a ejecutar `sudo scripts/init.sh`: comprueba la contraseña y crea
+Después vuelve a ejecutar `scripts/init.sh`: comprueba la contraseña y crea
 `APPDATA_ROOT/backup`.
 
 ### 2. Conecta Google Drive
@@ -121,7 +121,7 @@ de pruebas, para saber que funciona antes de necesitarlo.
 1. En la máquina nueva, instala Docker, clona la Plantilla y rellena `.env` con los
    **mismos** `RESTIC_PASSWORD`, `RESTIC_REPOSITORY` y `BACKUP_HOST`, además de
    `COMPOSE_PROFILES=backup` (y el resto de tus Perfiles).
-2. `sudo scripts/init.sh`
+2. `scripts/init.sh`
 3. Copia `rclone.conf` desde 1Password a `APPDATA_ROOT/backup/rclone.conf`
    (con `chmod 600`).
 4. Mira qué copias hay:

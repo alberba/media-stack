@@ -29,7 +29,7 @@ scripts/verify.sh         # todo healthy, y la IP de salida de qBittorrent es la
 1. **`scripts/setup.sh`** pregunta las rutas, `PUID`/`PGID` (`id -u`, `id -g`), la zona
    horaria, el proveedor y credenciales de la VPN, qué Perfiles activar, el admin de
    Jellyfin y las calidades a descargar; genera las API keys de las apps. Escribe `.env` y
-   ofrece ejecutar `sudo scripts/init.sh`, que comprueba el host y crea las carpetas de
+   ofrece ejecutar `scripts/init.sh`, que comprueba el host y crea las carpetas de
    `DATA_ROOT` y `APPDATA_ROOT` y la red de Docker. Puedes volver a ejecutarlo cuando
    quieras: propone los valores actuales y conserva lo que no pregunta.
 2. **`docker compose up -d`** arranca el Núcleo y los Perfiles de `COMPOSE_PROFILES`, y
@@ -38,7 +38,11 @@ scripts/verify.sh         # todo healthy, y la IP de salida de qBittorrent es la
    servicios del Núcleo y de `vo` (si está activo) están healthy, que `wire-seed` y `wire` terminaron correctamente y que la IP pública de qBittorrent es la de la VPN,
    no la tuya.
 
-Sin el asistente: copia `.env.example` a `.env`, rellénalo y ejecuta `sudo scripts/init.sh`.
+Sin el asistente: copia `.env.example` a `.env`, rellénalo y ejecuta `scripts/init.sh`.
+La validación usa los mismos valores que Compose, incluidas las variables exportadas en
+tu shell. `init.sh` pide privilegios solo al preparar carpetas. Para usar otro archivo,
+ejecuta `ENV_FILE=/ruta/instancia.env scripts/init.sh` y después el comando Compose
+con `--env-file` que imprime `init.sh`.
 
 Transcodificación por hardware con la GPU del host: pon
 `COMPOSE_FILE=compose.yaml:compose.gpu.yaml` y `RENDER_GID` en `.env` (ver `.env.example`).

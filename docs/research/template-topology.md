@@ -1,6 +1,6 @@
 # Shared Template topology design
 
-Design from the architecture review's candidate 3, implemented in `stacks/wire/wire/topology.json` and `topology.py`. See ADR-0003 for the trade-off and CONTEXT.md for terminology.
+Design from the architecture review's candidate 3, implemented in `stacks/wire/wire/topology.json` and `topology.py`. See ADR-0004 for the trade-off and CONTEXT.md for terminology.
 
 ## Scope
 
