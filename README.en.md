@@ -71,7 +71,7 @@ override, `compose.gpu.yaml`, turned on with `COMPOSE_FILE` in `.env`.
 
 ## Quickstart
 
-Requirements: **Linux**, Docker Engine with Compose 2.20 or newer, `/dev/net/tun`, and a
+Requirements: **Linux**, Docker Engine with Compose 2.20 or newer, Python 3.7 or newer, `/dev/net/tun`, and a
 VPN account. Windows and macOS are not supported.
 
 ```sh
@@ -110,6 +110,7 @@ Nothing specific to an Instance may be committed (see `docs/adr/0001`). The
 ```sh
 git config core.hooksPath .githooks   # gitleaks pre-commit hook (gitleaks or Docker)
 tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
+tests/topology.test.sh && tests/wire.test.sh   # endpoint resolution and app connections
 tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # need python3, and node or Docker
 tests/backup.test.sh && tests/backup-image.test.sh   # needs sqlite3 and Docker
 ```

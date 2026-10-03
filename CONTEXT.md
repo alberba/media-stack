@@ -14,6 +14,11 @@ One concrete server deployed from the Template, with its own `.env`, app data an
 _Avoid_: install, deployment, server (when referring to a specific one)
 _ES_: Instancia
 
+**Template topology**:
+The default arrangement of an Instance's services, their connection addresses and their library and download folders, as defined by the Template. An Operator's existing configuration can differ from these defaults.
+_Avoid_: live topology, Instance configuration (when referring to Template defaults)
+_ES_: Topología de la Plantilla
+
 **Operator**:
 The person who installs and maintains an Instance.
 _Avoid_: user, admin

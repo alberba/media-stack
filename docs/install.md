@@ -10,6 +10,7 @@ y lee la [checklist de seguridad](security.md) antes de exponer nada.
 - **Linux** (cualquier distribución; vale un NAS con Docker). Windows y macOS no están
   soportados: gluetun necesita `/dev/net/tun` y los hardlinks, un sistema de ficheros Linux.
 - **Docker Engine** con **Compose 2.20** o superior (`docker compose version`).
+- **Python 3.7** o superior en el host (`python3 --version`), sin paquetes adicionales.
 - `/dev/net/tun` en el host (`ls -l /dev/net/tun`).
 - Una **cuenta de VPN** de un proveedor [soportado por gluetun](https://github.com/qdm12/gluetun-wiki/tree/main/setup/providers),
   con su clave WireGuard o sus credenciales OpenVPN.
@@ -34,7 +35,7 @@ scripts/verify.sh         # todo healthy, y la IP de salida de qBittorrent es la
 2. **`docker compose up -d`** arranca el Núcleo y los Perfiles de `COMPOSE_PROFILES`, y
    el contenedor `wire` [conecta las apps](wiring.md) entre sí.
 3. **`scripts/verify.sh`** comprueba, un par de minutos después de arrancar, que todos los
-   servicios del Núcleo están healthy, que `wire` conectó las apps y que la IP pública de qBittorrent es la de la VPN,
+   servicios del Núcleo y de `vo` (si está activo) están healthy, que `wire-seed` y `wire` terminaron correctamente y que la IP pública de qBittorrent es la de la VPN,
    no la tuya.
 
 Sin el asistente: copia `.env.example` a `.env`, rellénalo y ejecuta `sudo scripts/init.sh`.

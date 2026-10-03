@@ -13,6 +13,7 @@ import json
 import os
 
 from .steps import PROFILE
+from .config import TOPOLOGY
 
 # Every quality the wizard offers, best first. Each maps to its name, or its group of
 # names, in Radarr and in Sonarr (None: that manager has no such quality).
@@ -119,7 +120,7 @@ def instance(m, selected, create):
     ids = TRASH[m.kind]
     languages = ids["vo"] if m.vo else [spanish_trash_id(m.kind)]
     return {
-        "base_url": f"http://{m.key}:{m.port}",
+        "base_url": TOPOLOGY.url("wire", m.key),
         "api_key": m.api_key,
         "quality_profiles": [profile],
         "custom_formats": [{"trash_ids": ids["unwanted"] + ids["tiers"] + languages,

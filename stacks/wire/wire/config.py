@@ -8,7 +8,11 @@ that is the key the app really uses (an Instance configured before the Wiring ex
 import json
 import os
 import re
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
+
+from . import topology
+
+TOPOLOGY = topology.load()
 
 
 @dataclass
@@ -29,22 +33,14 @@ class Manager:
         return self.key.upper().replace("-", "_")
 
 
-MANAGERS = [
-    Manager("radarr", "radarr", "Radarr", 7878, "/data/media/movies", "movies", False),
-    Manager("sonarr", "sonarr", "Sonarr", 8989, "/data/media/tv", "tv", False),
-    Manager("radarr-vo", "radarr", "Radarr VO", 7879, "/data/media/movies-vo", "movies-vo", True),
-    Manager("sonarr-vo", "sonarr", "Sonarr VO", 8990, "/data/media/tv-vo", "tv-vo", True),
-]
-
-
 def profiles(environ):
-    return {p.strip() for p in (environ.get("COMPOSE_PROFILES") or "").split(",") if p.strip()}
+    return topology.profiles(environ.get("COMPOSE_PROFILES") or "")
 
 
 def managers(environ):
     """The managers this Instance runs: the Core ones, plus the VO ones with the vo Profile."""
-    vo = "vo" in profiles(environ)
-    return [replace(m) for m in MANAGERS if vo or not m.vo]
+    return [Manager(s["key"], port=s["port"], vo=bool(s.get("profile")), **s["manager"])
+            for s in TOPOLOGY.managers(profiles(environ))]
 
 
 def read(path):

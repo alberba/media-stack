@@ -53,18 +53,20 @@ def wire():
         print(f"FAIL no API key for {', '.join(missing)}: run scripts/setup.sh", flush=True)
         return 1
 
-    jellyfin = Client("http://jellyfin:8096")
-    seerr = Client("http://seerr:5055", {"X-Api-Key": cfg["seerr_key"]})
+    topology = config.TOPOLOGY
+    jellyfin = Client(topology.url("wire", "jellyfin"))
+    seerr = Client(topology.url("wire", "seerr"), {"X-Api-Key": cfg["seerr_key"]})
     arr_clients = {}
     waits = [(jellyfin, "/System/Info/Public", False), (seerr, "/api/v1/status", False)]
     for m in cfg["managers"]:
-        arr_clients[m.key], path = arr(m.key, m.port, m.api_key, "v3")
+        arr_clients[m.key], path = arr(*topology.endpoint("wire", m.key), m.api_key, "v3")
         waits.append((arr_clients[m.key], path, False))
-    prowlarr, path = arr("prowlarr", 9696, cfg["prowlarr_key"], "v1")
+    prowlarr, path = arr(*topology.endpoint("wire", "prowlarr"), cfg["prowlarr_key"], "v1")
     waits.append((prowlarr, path, False))
     # Radarr, Sonarr and Prowlarr test the connection when qBittorrent and FlareSolverr
     # are added, so those must answer too. qBittorrent's page answers without a login.
-    waits += [(Client("http://qbittorrent:8080"), "/", True), (Client("http://flaresolverr:8191"), "/health", False)]
+    waits += [(Client(topology.url("wire", "qbittorrent")), "/", True),
+              (Client(topology.url("wire", "flaresolverr")), "/health", False)]
     for client, path, any_answer in waits:
         try:
             client.wait(path, WAIT, any_answer=any_answer)
@@ -82,7 +84,7 @@ def wire():
     # After Seerr: SeerrReporter uses its API key, and a restart for new plugins should
     # not cut the other steps off.
     run("jellyfin-extras", lambda: extras.customize(
-        "http://jellyfin:8096", cfg, UI_FOLDER, wait=lambda: jellyfin.wait("/System/Info/Public", WAIT)), failures)
+        topology.url("wire", "jellyfin"), cfg, UI_FOLDER, wait=lambda: jellyfin.wait("/System/Info/Public", WAIT)), failures)
     if failures:
         print(f"FAIL wiring incomplete: {', '.join(failures)}. Fix it and run `docker compose up wire` again.", flush=True)
         return 1

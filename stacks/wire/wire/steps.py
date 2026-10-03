@@ -9,6 +9,7 @@ localhost; Seerr is outside it and reaches them by service name.
 """
 
 from .api import ApiError
+from .config import TOPOLOGY
 
 LIBRARIES = [("Películas", "movies", "radarr"), ("Series", "tvshows", "sonarr")]
 PROFILE = "Media Stack"
@@ -79,8 +80,9 @@ def manager(client, m, cfg):
         log.append(f"{m.key}: WARN no QBITTORRENT_PASSWORD in .env, add qBittorrent by hand")
     else:
         category = "movieCategory" if m.kind == "radarr" else "tvCategory"
+        host, port = TOPOLOGY.endpoint(m.key, "qbittorrent")
         from_schema(client, "/api/v3/downloadclient", "QBittorrent", "qBittorrent", {
-            "host": "localhost", "port": 8080, "username": cfg["qbittorrent_user"],
+            "host": host, "port": port, "username": cfg["qbittorrent_user"],
             "password": cfg["qbittorrent_password"], category: m.category,
         }, enable=True)
         log.append(f"{m.key}: qBittorrent added (category {m.category})")
@@ -94,11 +96,11 @@ def prowlarr(client, cfg):
     apps = client.get("/api/v1/applications")
     wired = {field(a, "baseUrl").rstrip("/") for a in apps if field(a, "baseUrl")}
     for m in cfg["managers"]:
-        url = f"http://localhost:{m.port}"
+        url = TOPOLOGY.url("prowlarr", m.key)
         if url in wired:
             continue
         from_schema(client, "/api/v1/applications", m.kind.capitalize(), m.name, {
-            "prowlarrUrl": "http://localhost:9696", "baseUrl": url, "apiKey": m.api_key,
+            "prowlarrUrl": TOPOLOGY.url("prowlarr", "prowlarr"), "baseUrl": url, "apiKey": m.api_key,
         }, syncLevel="fullSync")
         log.append(f"prowlarr: {m.name} added")
     if any(p["implementation"] == "FlareSolverr" for p in client.get("/api/v1/indexerProxy")):
@@ -106,7 +108,7 @@ def prowlarr(client, cfg):
     tag = next((t for t in client.get("/api/v1/tag") if t["label"] == "flaresolverr"), None)
     tag = tag or client.post("/api/v1/tag", {"label": "flaresolverr"})
     from_schema(client, "/api/v1/indexerProxy", "FlareSolverr", "FlareSolverr",
-                {"host": "http://localhost:8191/"}, tags=[tag["id"]])
+                {"host": TOPOLOGY.url("prowlarr", "flaresolverr") + "/"}, tags=[tag["id"]])
     log.append("prowlarr: FlareSolverr added as proxy (tag flaresolverr: add it to indexers that need it)")
     return log
 
@@ -120,9 +122,10 @@ def seerr(client, cfg, arr_clients):
     if public.get("mediaServerType") == NOT_CONFIGURED:
         if not (cfg["jellyfin_user"] and cfg["jellyfin_password"]):
             return ["seerr: WARN no JELLYFIN_ADMIN_USER/PASSWORD in .env, finish its setup by hand"]
+        host, port = TOPOLOGY.endpoint("seerr", "jellyfin")
         client.post("/api/v1/auth/jellyfin", {
             "username": cfg["jellyfin_user"], "password": cfg["jellyfin_password"],
-            "hostname": "jellyfin", "port": 8096, "urlBase": "", "useSsl": False,
+            "hostname": host, "port": port, "urlBase": "", "useSsl": False,
             "serverType": JELLYFIN,
         })
         # Seerr v3.5: POST .../sync reads Jellyfin's libraries, PUT .../{id} turns one on.
@@ -133,7 +136,8 @@ def seerr(client, cfg, arr_clients):
     for kind in ("radarr", "sonarr"):
         servers = client.get(f"/api/v1/settings/{kind}")
         for m in [m for m in cfg["managers"] if m.kind == kind]:
-            if any(s["hostname"] == m.key and s["port"] == m.port for s in servers):
+            host, port = TOPOLOGY.endpoint("seerr", m.key)
+            if any(s["hostname"] == host and s["port"] == port for s in servers):
                 continue
             body = dvr_server(m, arr_clients[m.key], default=not m.vo and not any(s["isDefault"] for s in servers))
             servers.append(client.post(f"/api/v1/settings/{kind}", body))
@@ -147,8 +151,9 @@ def seerr(client, cfg, arr_clients):
 def dvr_server(m, arr, default):
     profiles = arr.get("/api/v3/qualityprofile")
     profile = next((p for p in profiles if p["name"] == PROFILE), profiles[0])
+    host, port = TOPOLOGY.endpoint("seerr", m.key)
     body = {
-        "name": m.name, "hostname": m.key, "port": m.port, "apiKey": m.api_key,
+        "name": m.name, "hostname": host, "port": port, "apiKey": m.api_key,
         "useSsl": False, "baseUrl": "", "activeProfileId": profile["id"],
         "activeProfileName": profile["name"], "activeDirectory": m.root, "tags": [],
         "is4k": False, "isDefault": default, "externalUrl": "", "syncEnabled": False,

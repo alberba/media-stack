@@ -38,6 +38,8 @@ jobs:
           docker compose --project-directory worker config --quiet
       - name: Template tests
         run: tests/template.test.sh
+      - name: Topology resolution and drift detection tests
+        run: tests/topology.test.sh
       - name: Profile module tests
         run: tests/profiles.test.sh
       - name: init.sh tests

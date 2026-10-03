@@ -54,8 +54,8 @@ class Seeder:
     def run(self):
         for m in config.managers(self.environ):
             self.arr(m.key, m.env)
-            for folder in (m.root, f"/data/torrents/{m.category}"):
-                self.makedirs(os.path.join(self.data, os.path.relpath(folder, "/data")))
+        for folder in config.TOPOLOGY.folders(config.profiles(self.environ)):
+            self.makedirs(os.path.join(self.data, folder))
         self.arr("prowlarr", "PROWLARR")
         self.bazarr()
         self.qbittorrent()
@@ -71,6 +71,8 @@ class Seeder:
         if not all(keys):
             return
         bazarr, radarr, sonarr = keys
+        radarr_host, radarr_port = config.TOPOLOGY.endpoint("bazarr", "radarr")
+        sonarr_host, sonarr_port = config.TOPOLOGY.endpoint("bazarr", "sonarr")
         # Bazarr runs behind the VPN with Radarr and Sonarr, so they are on localhost.
         self.write("bazarr/config/config.yaml", f"""auth:
   apikey: {bazarr}
@@ -78,13 +80,13 @@ general:
   use_radarr: true
   use_sonarr: true
 radarr:
-  ip: localhost
-  port: 7878
+  ip: {radarr_host}
+  port: {radarr_port}
   base_url: ''
   apikey: {radarr}
 sonarr:
-  ip: localhost
-  port: 8989
+  ip: {sonarr_host}
+  port: {sonarr_port}
   base_url: ''
   apikey: {sonarr}
 """, secret=True)

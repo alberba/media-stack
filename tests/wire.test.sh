@@ -15,10 +15,11 @@ import re
 import tempfile
 import threading
 import unittest
+from unittest.mock import patch
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from wire import config, extras, quality, seed, steps
+from wire import config, extras, quality, seed, steps, topology
 from wire.api import Client
 
 
@@ -283,6 +284,20 @@ class Manager(Case):
         steps.manager(Client(app.url), cfg["managers"][1], cfg)
         self.assertEqual(fields(app.lists["/api/v3/downloadclient"][0])["tvCategory"], "tv")
         self.assertEqual(app.lists["/api/v3/rootfolder"][0]["path"], "/data/media/tv")
+
+    def test_connection_follows_a_changed_namespace_and_listener_port(self):
+        document = json.loads(json.dumps({"services": list(config.TOPOLOGY.services.values())}))
+        radarr = next(s for s in document["services"] if s["key"] == "radarr")
+        radarr.update(namespace="radarr", publication={"service": "radarr", "port": radarr["port"]})
+        qbittorrent = next(s for s in document["services"] if s["key"] == "qbittorrent")
+        qbittorrent["port"] = 4100
+        t = topology.Topology(document)
+        app = self.radarr()
+        with patch.object(config, "TOPOLOGY", t), patch.object(steps, "TOPOLOGY", t):
+            cfg = self.cfg()
+            steps.manager(Client(app.url), cfg["managers"][0], cfg)
+        connection = fields(app.lists["/api/v3/downloadclient"][0])
+        self.assertEqual((connection["host"], connection["port"]), ("qbittorrent", 4100))
 
     def test_what_is_there_is_left_alone(self):
         app = self.radarr(roots=["/data/media/movies/"], clients=[{"implementation": "QBittorrent", "name": "mine"}])
