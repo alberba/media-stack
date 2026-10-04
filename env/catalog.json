@@ -220,16 +220,6 @@
     "secret": false,
     "wire": true
   },
-  "JELLYFIN_SEERR_REPORTER": {
-    "scopes": {
-      "instance": {
-        "default": "off",
-        "required": false
-      }
-    },
-    "secret": false,
-    "wire": true
-  },
   "MEDIA_NETWORK": {
     "scopes": {
       "instance": {
