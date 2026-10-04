@@ -44,7 +44,11 @@ Breaking changes: no
 Run `scripts/release.sh vX.Y.Z`. It requires a clean main branch, validates the
 Core, each Profile individually, all Profiles together, GPU and Worker configs,
 runs all `tests/*.test.sh` (including the provider check against the pinned
-Gluetun image), and then creates an annotated local tag. It uses a temporary .env
+Gluetun image), and then creates an annotated local tag. Validation is shared with
+CI through `scripts/check.sh release`, which also runs lint and builds local
+images. Use a dedicated Linux test machine: the real-app Wiring test starts a
+second scratch stack. See [testing and failure diagnosis](agents/testing.md) for
+prerequisites, CI coverage and preserved logs. It uses a temporary .env
 and never reads Instance secrets. Tests needing root must run with sudo. Review
 the resulting tag, then publish explicitly:
 

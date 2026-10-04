@@ -1,0 +1,23 @@
+name: Wiring integration
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  wiring:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+      - name: Wire the pinned apps and check idempotence
+        run: scripts/check.sh integration
+      - name: Upload redacted failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wiring-diagnostics
+          path: /tmp/wire-it-diagnostics.*/*.log
+          if-no-files-found: ignore

@@ -23,26 +23,6 @@ grep -qE '^Breaking changes: (yes|no)$' "$NOTES" || die 'Notes need Breaking cha
 for heading in 'Images bumped' 'New settings' 'New Profiles' Fixes 'Manual steps'; do
   grep -qFx "## $heading" "$NOTES" || die "Missing release heading: $heading"
 done
-WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
-python3 scripts/env_contract.py check || die 'Generated environment contract is out of date.'
-python3 scripts/env_contract.py fixture > "$WORK/.env"
-python3 scripts/env_contract.py fixture --scope worker > "$WORK/worker.env"
-# Explicit files and env files isolate validation from ignored Instance settings.
-while IFS= read -r key; do unset "$key"; done < <(sed -nE 's/^[[:space:]]*(#[[:space:]]*)?([A-Za-z_][A-Za-z0-9_]*)=.*/\2/p' .env.example)
-unset COMPOSE_FILE COMPOSE_PROFILES COMPOSE_PROJECT_NAME COMPOSE_ENV_FILES COMPOSE_DISABLE_ENV_FILE
-compose() { docker compose --project-directory "$REPO" --env-file "$WORK/.env" -f compose.yaml "$@"; }
-compose config --quiet
-PROFILES="$(compose config --profiles)"
-while IFS= read -r profile; do
-  [ -z "$profile" ] || compose --profile "$profile" config --quiet
-done <<< "$PROFILES"
-compose --profile '*' config --quiet
-compose -f compose.gpu.yaml --profile '*' config --quiet
-docker compose --project-directory "$REPO/worker" --env-file "$WORK/worker.env" config --quiet
-for test in tests/*.test.sh; do
-  echo "Running $test"
-  bash "$test"
-done
+bash scripts/check.sh release
 git tag -a "$VERSION" -F "$NOTES"
 printf 'Validated local tag %s. Publish explicitly:\ngit push origin %s\ngh release create %s --verify-tag --title %s --notes-file %s\n' "$VERSION" "$VERSION" "$VERSION" "$VERSION" "$NOTES"

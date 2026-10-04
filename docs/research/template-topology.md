@@ -1,5 +1,9 @@
 # Shared Template topology design
 
+**Status: implemented.** Current behavior lives in [topology.json](../../stacks/wire/wire/topology.json)
+and [topology.py](../../stacks/wire/wire/topology.py); decisions are in
+[ADR-0004](../adr/0004-template-topology-contract.md). This note retains design and acceptance criteria.
+
 Design from the architecture review's candidate 3, implemented in `stacks/wire/wire/topology.json` and `topology.py`. See ADR-0004 for the trade-off and CONTEXT.md for terminology.
 
 ## Scope

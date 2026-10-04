@@ -24,59 +24,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
-      - name: Lint scripts
-        run: shellcheck scripts/*.sh scripts/lib/*.sh tests/*.sh stacks/*/*.sh .githooks/pre-commit
-      - name: Check generated environment contract
-        run: python3 scripts/env_contract.py check
-      - name: Validate the Core, and the Core with every Profile, with docker compose config
-        run: |
-          python3 scripts/env_contract.py fixture > .env
-          docker compose config --quiet
-          docker compose --profile '*' config --quiet
-          COMPOSE_FILE=compose.yaml:compose.gpu.yaml docker compose --profile '*' config --quiet
-          COMPOSE_FILE=compose.yaml:compose.gpu.yaml:compose.syncplay.yaml docker compose config --quiet
-      - name: Validate the Worker's compose
-        run: |
-          python3 scripts/env_contract.py fixture --scope worker > worker/.env
-          docker compose --project-directory worker config --quiet
-          python3 scripts/env_contract.py validate --scope worker --file worker/.env
-      - name: Environment contract tests
-        run: tests/env-contract.test.sh
-      - name: Template tests
-        run: tests/template.test.sh
-      - name: Topology resolution and drift detection tests
-        run: tests/topology.test.sh
-      - name: Profile module tests
-        run: tests/profiles.test.sh
-      - name: init.sh tests
-        run: sudo tests/init.test.sh
-      - name: setup.sh tests
-        run: tests/setup.test.sh
-      - name: Release and upgrade CLI tests
-        run: |
-          tests/release.test.sh
-          tests/upgrade.test.sh
-      - name: VPN provider table against the pinned Gluetun image
-        run: tests/vpn-providers.test.sh
-      - name: Gluetun control server authentication against the pinned image
-        run: tests/gluetun-control.test.sh
-      - name: verify.sh tests
-        run: tests/verify.test.sh
-      - name: pre-commit hook tests
-        run: tests/hooks.test.sh
-      - name: Wiring tests
-        run: tests/wire.test.sh
-      - name: extras Profile issue-automator tests
-        run: tests/issue-automator.test.sh
-      - name: transcode Profile Tdarr plugin tests
-        run: tests/tdarr-plugin.test.sh
-      - name: Jellyfin Android SyncPlay web player tests
-        run: bash tests/syncplay.test.sh
-      - name: Build the locally built Profile images
-        run: docker compose --profile '*' build
-      - name: Install sqlite3 for the backup tests
+      - name: Install check dependencies
         run: command -v sqlite3 || { sudo apt-get update && sudo apt-get install -y sqlite3; }
-      - name: backup Profile script tests
-        run: tests/backup.test.sh
-      - name: backup Profile image, backup and restore round trip
-        run: tests/backup-image.test.sh
+      - name: Validate the Template
+        run: scripts/check.sh ci

@@ -96,7 +96,9 @@ compose.gpu.yaml        optional override: host GPU for Jellyfin and Tdarr
 stacks/<stack>/         one compose file per stack (Core or Profile)
 worker/                 Tdarr node for a Linux Worker, and the Windows node's config
 scripts/setup.sh        interactive wizard that writes .env
-scripts/init.sh         host checks + folders + network
+scripts/init.sh         .env validation + host checks + folders + network
+env/catalog.json        Instance and Worker environment contract
+scripts/env_contract.py Compose-backed reading, validation and example generation
 scripts/verify.sh       post-start health and VPN check
 docs/                   guides (install, wiring, security, Profiles, backup, transcoding)
 .env.example            every setting, commented
@@ -107,13 +109,10 @@ docs/                   guides (install, wiring, security, Profiles, backup, tra
 Nothing specific to an Instance may be committed (see `docs/adr/0001`). The
 `.gitignore` is a whitelist, and gitleaks scans every commit and every push.
 
-```sh
-git config core.hooksPath .githooks   # gitleaks pre-commit hook (gitleaks or Docker)
-tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
-tests/topology.test.sh && tests/wire.test.sh   # endpoint resolution and app connections
-tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # need python3, and node or Docker
-tests/backup.test.sh && tests/backup-image.test.sh   # needs sqlite3 and Docker
-```
+See [testing and failure diagnosis](docs/agents/testing.md) for local checks,
+Linux prerequisites and CI versus real-app integration coverage. Start with
+`scripts/check.sh fast`; use `scripts/check.sh ci` for the CI suite. The
+[navigation map](docs/agents/navigation.md) links each area to its sources and tests.
 
 Image versions are pinned; [Renovate](https://github.com/apps/renovate) opens PRs to bump
 them.
