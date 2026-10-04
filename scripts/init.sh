@@ -173,6 +173,32 @@ prepare_network() {
   fi
 }
 
+# Persist only this generated secret; leave existing Instance settings untouched.
+prepare_control_key() {
+  local key
+  [ -z "$(env_get GLUETUN_CONTROL_API_KEY)" ] || return 0
+  if [ "${GLUETUN_CONTROL_API_KEY+x}" = x ]; then
+    echo "error: GLUETUN_CONTROL_API_KEY has an empty shell override: unset it and run scripts/init.sh again." >&2
+    return 1
+  fi
+  if ! key="$(openssl rand -hex 32 2>/dev/null)" || ! [[ "$key" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "error: cannot generate GLUETUN_CONTROL_API_KEY. Install openssl or set it in $ENV_FILE with 'openssl rand -hex 32'." >&2
+    return 1
+  fi
+  chmod 600 "$ENV_FILE"
+  if ! printf '%s' "$key" | python3 "$REPO/scripts/env_contract.py" set --file "$ENV_FILE" --name GLUETUN_CONTROL_API_KEY; then
+    echo "error: cannot save GLUETUN_CONTROL_API_KEY in $ENV_FILE." >&2
+    return 1
+  fi
+  # Reload to respect Compose interpolation and shell overrides after writing.
+  load_env || return 1
+  if [ -z "$(env_get GLUETUN_CONTROL_API_KEY)" ]; then
+    echo "error: GLUETUN_CONTROL_API_KEY is still empty: remove the empty shell override and run scripts/init.sh again." >&2
+    return 1
+  fi
+  echo "Generated GLUETUN_CONTROL_API_KEY in $ENV_FILE."
+}
+
 main() {
   if [ ! -f "$ENV_FILE" ]; then
     echo "No $ENV_FILE found. Copy .env.example to .env and fill it in first." >&2
@@ -190,6 +216,7 @@ main() {
     printf 'error: %s\n' "${errors[@]}" >&2
     exit 1
   fi
+  prepare_control_key
   prepare_folders
   prepare_network
   echo "Done. Start the Instance with: docker compose up -d"

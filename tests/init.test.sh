@@ -72,6 +72,59 @@ test_succeeds_with_a_valid_env() {
   assert_status 0
 }
 
+test_generates_and_persists_a_missing_gluetun_control_key() {
+  run_init
+  assert_status 0
+  local key
+  key="$(python3 "$REPO/scripts/env_contract.py" get --file "$ENV_FILE" --name GLUETUN_CONTROL_API_KEY)"
+  [[ "$key" =~ ^[0-9a-f]{64}$ ]] || fail "init did not persist a 32-byte hex API key"
+  assert_output_not_contains "$key"
+  run_init
+  assert_status 0
+  [ "$(python3 "$REPO/scripts/env_contract.py" get --file "$ENV_FILE" --name GLUETUN_CONTROL_API_KEY)" = "$key" ] \
+    || fail "init changed the existing key"
+}
+
+test_generates_an_empty_gluetun_control_key_without_losing_operator_settings() {
+  printf '# Operator note\nGLUETUN_CONTROL_API_KEY=\nOPERATOR_EXTENSION=keep\n' >> "$ENV_FILE"
+  run_init
+  assert_status 0
+  assert_file_contains "$ENV_FILE" '# Operator note'
+  assert_file_contains "$ENV_FILE" 'OPERATOR_EXTENSION=keep'
+  [ "$(stat -c '%a' "$ENV_FILE")" = 600 ] || fail "generated secret is not private"
+  [[ "$(python3 "$REPO/scripts/env_contract.py" get --file "$ENV_FILE" --name GLUETUN_CONTROL_API_KEY)" =~ ^[0-9a-f]{64}$ ]] \
+    || fail "empty key was not generated"
+}
+
+test_preserves_a_gluetun_control_key_supplied_by_the_shell() {
+  local before key
+  before="$(cat "$ENV_FILE")"
+  key="$(printf '%064d' 0)"
+  GLUETUN_CONTROL_API_KEY="$key" run_init
+  assert_status 0
+  [ "$(cat "$ENV_FILE")" = "$before" ] || fail "shell key caused the file to change"
+  assert_output_not_contains "$key"
+}
+
+test_fails_clearly_when_gluetun_control_key_generation_fails() {
+  printf '#!/usr/bin/env bash\nexit 1\n' > "$SANDBOX/bin/openssl"
+  chmod +x "$SANDBOX/bin/openssl"
+  run_init
+  assert_status 1
+  assert_output_contains 'cannot generate GLUETUN_CONTROL_API_KEY'
+  assert_output_contains 'openssl rand -hex 32'
+  [ ! -e "$SANDBOX/appdata" ] || fail "App data created without a control key"
+}
+
+test_empty_shell_override_fails_without_changing_the_env_file() {
+  local before
+  before="$(cat "$ENV_FILE")"
+  GLUETUN_CONTROL_API_KEY='' run_init
+  assert_status 1
+  assert_output_contains 'empty shell override'
+  [ "$(cat "$ENV_FILE")" = "$before" ] || fail "empty shell override changed the file"
+}
+
 test_shell_override_matches_compose_precedence() {
   PUID=4321 run_init
   assert_status 0

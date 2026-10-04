@@ -118,9 +118,11 @@ def validate(path, scope):
             state = Path(current[exception["root"]]) / exception["path"]
             waived = state.is_file() and state.stat().st_size > 0
         pattern = setting.get("pattern")
-        if pattern and active and not waived and not re.fullmatch(pattern, value):
+        if pattern and (active or (value and not condition)) and not waived and not re.fullmatch(pattern, value):
             detail = setting["pattern_description"]
-            message = f"{name} must be {detail} ({condition_label(condition)})"
+            message = f"{name} must be {detail}"
+            if active:
+                message += f" ({condition_label(condition)})"
             if setting.get("hint"):
                 message += f": {setting['hint']}"
             errors.append(message)
@@ -273,7 +275,7 @@ def main():
                 continue
             default = CATALOG[name]["scopes"][args.scope]["default"]
             if not default and (args.scope == "worker" or name not in ("COMPOSE_PROFILES", "BACKUP_SOURCE", "COMPOSE_FILE")):
-                default = "dummy"
+                default = CATALOG[name]["scopes"][args.scope].get("fixture_value", "dummy")
             print(f"{name}={default}")
         return 0
     path = args.file or REPO / (".env" if args.scope == "instance" else "worker/.env")

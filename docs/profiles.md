@@ -81,9 +81,19 @@ by everyone and older than a year). Connect Jellyfin (`http://jellyfin:8096`), S
 - **Homarr** (`http://<host>:7575`): a start page. Set `HOMARR_SECRET_KEY` first
   (`openssl rand -hex 32`) and keep it in your password manager: Homarr encrypts its
   integrations with it.
+  To add the **VPN** widget, create a **Gluetun** integration with URL
+  `http://gluetun:8000` and the API key from `GLUETUN_CONTROL_API_KEY` in `.env`
+  (`scripts/init.sh` generates it when empty). Test the integration, then select it
+  in the VPN widget to show the VPN status, public IP, country and provider.
 - **Dockge** (`http://<host>:5001`): a web UI for compose stacks. `DOCKGE_STACKS_DIR` is
   the folder it manages; point it at the folder that holds this clone to see the
   Instance as a stack. Edits made in Dockge to the Template's files show up in `git status`.
+
+On an existing Instance, run `scripts/init.sh` to create the control server key,
+then `docker compose up -d` to apply it. This recreates gluetun and the services
+sharing its network, briefly interrupting downloads and indexer access. All control
+server routes require the key; persisted roles in `/gluetun/auth/config.toml` are
+ignored so they cannot leave routes open. Port 8000 stays internal to the media network.
 
 Only Dockge mounts the Docker socket read-write, because it starts and stops stacks.
 Homarr, Beszel and What's Up Docker mount it read-only. Note that `:ro` only protects

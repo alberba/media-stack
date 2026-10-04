@@ -58,6 +58,8 @@ jobs:
           tests/upgrade.test.sh
       - name: VPN provider table against the pinned Gluetun image
         run: tests/vpn-providers.test.sh
+      - name: Gluetun control server authentication against the pinned image
+        run: tests/gluetun-control.test.sh
       - name: verify.sh tests
         run: tests/verify.test.sh
       - name: pre-commit hook tests
