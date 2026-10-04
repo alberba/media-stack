@@ -81,8 +81,7 @@ def wire():
     run("quality", lambda: recyclarr(cfg, arr_clients), failures)
     # Last: Seerr picks the quality profile the step above created.
     run("seerr", lambda: steps.seerr(seerr, cfg, arr_clients), failures)
-    # After Seerr: SeerrReporter uses its API key, and a restart for new plugins should
-    # not cut the other steps off.
+    # Last: a restart for new Jellyfin plugins should not cut the other steps off.
     run("jellyfin-extras", lambda: extras.customize(
         topology.url("wire", "jellyfin"), cfg, UI_FOLDER, wait=lambda: jellyfin.wait("/System/Info/Public", WAIT)), failures)
     if failures:

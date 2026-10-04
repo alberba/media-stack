@@ -54,8 +54,8 @@ answer_profiles
 NO_PROFILES=("${PROFILES_ANSWERS[@]}")
 NO_TELEGRAM=("")
 # App connections: Jellyfin admin user and password, and the qualities (Enter keeps them),
-# then the two Jellyfin customizations (Enter = no).
-APPS=("" "" "" "" "")
+# then the Abyss customization (Enter = no).
+APPS=("" "" "" "")
 
 test_writes_a_valid_env_for_the_core() {
   run_setup "${PATHS[@]}" protonvpn wireguard "wg-key=" "" y "${NO_PROFILES[@]}" n "${APPS[@]}" "${NO_TELEGRAM[@]}" n
@@ -228,7 +228,7 @@ test_apps_already_set_up_keep_their_own_keys() {
   mkdir -p "$SANDBOX/app/radarr" "$SANDBOX/app/qbittorrent/qBittorrent"
   touch "$SANDBOX/app/radarr/config.xml" "$SANDBOX/app/qbittorrent/qBittorrent/qBittorrent.conf"
   run_setup "$SANDBOX/app" "/srv/data" "Europe/Madrid" "" "" cyberghost u p "" "${NO_PROFILES[@]}" n \
-    "my-qbit-pass" "" "" "" "" "" "${NO_TELEGRAM[@]}" n
+    "my-qbit-pass" "" "" "" "" "${NO_TELEGRAM[@]}" n
   assert_status 0
   grep -qE "^RADARR_API_KEY=$" "$ENV_FILE" || fail "RADARR_API_KEY must stay empty for a Radarr already set up"
   grep -qE "^SONARR_API_KEY=[0-9a-f]{32}$" "$ENV_FILE" || fail "SONARR_API_KEY was not generated"
@@ -238,7 +238,7 @@ test_apps_already_set_up_keep_their_own_keys() {
 test_a_jellyfin_already_set_up_gets_no_generated_password() {
   mkdir -p "$SANDBOX/app/jellyfin/config/data"
   run_setup "$SANDBOX/app" "/srv/data" "Europe/Madrid" "" "" cyberghost u p "" "${NO_PROFILES[@]}" n \
-    "" "" "" "" "" "${NO_TELEGRAM[@]}" n
+    "" "" "" "" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_contains "Jellyfin is already set up"
   grep -qE "^JELLYFIN_ADMIN_PASSWORD=$" "$ENV_FILE" || fail "JELLYFIN_ADMIN_PASSWORD must not be generated"
@@ -246,7 +246,7 @@ test_a_jellyfin_already_set_up_gets_no_generated_password() {
 
 test_qualities_start_ticked_and_can_be_toggled() {
   # Untick Remux-2160p (1) and tick DVD (15), then accept.
-  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "1 15" "" "" "" "${NO_TELEGRAM[@]}" n
+  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "1 15" "" "" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_contains " 1 [x] Remux-2160p"
   assert_output_contains " 1 [ ] Remux-2160p"
@@ -254,18 +254,18 @@ test_qualities_start_ticked_and_can_be_toggled() {
 }
 
 test_at_least_one_quality_must_be_ticked() {
-  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "1 2 3 4 5 6 7 8 9 10" "" "18" "" "" "" "${NO_TELEGRAM[@]}" n
+  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "1 2 3 4 5 6 7 8 9 10" "" "18" "" "" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_contains "Tick at least one quality."
   assert_file_contains "$ENV_FILE" "QUALITIES=BR-DISK"
 }
 
 test_jellyfin_customizations_are_opt_in_and_kept_on_rerun() {
-  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "" y n "${NO_TELEGRAM[@]}" n
+  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "" y "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_file_contains "$ENV_FILE" "JELLYFIN_ABYSS=on"
-  assert_file_contains "$ENV_FILE" "JELLYFIN_SEERR_REPORTER=off"
-  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "" "" "" "${NO_TELEGRAM[@]}" n
+  assert_output_not_contains "Install SeerrReporter"
+  run_setup "${PATHS[@]}" cyberghost u p "" "${NO_PROFILES[@]}" n "" "" "" "" "${NO_TELEGRAM[@]}" n
   assert_status 0
   assert_output_contains "Apply the Abyss theme to Jellyfin (dark, Spotlight home banner)? [Y/n]"
   assert_file_contains "$ENV_FILE" "JELLYFIN_ABYSS=on"

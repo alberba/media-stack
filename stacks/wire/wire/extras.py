@@ -1,5 +1,5 @@
 """The Jellyfin customizations the Operator opted into in scripts/setup.sh (#11,
-docs/jellyfin-customizations.md): the Abyss theme and the SeerrReporter plugin.
+docs/jellyfin-customizations.md): the Abyss theme and Spotlight.
 
 Nothing is written inside the Jellyfin image. The theme's CSS and the Viewers' display
 preferences live in Jellyfin's App data; Spotlight's three files are served from a
@@ -17,7 +17,6 @@ import urllib.parse
 import urllib.request
 
 from .api import Client
-from .config import TOPOLOGY
 
 # renovate: datasource=github-releases depName=AumGupta/abyss-jellyfin
 ABYSS_VERSION = "v1.2.3"
@@ -38,25 +37,17 @@ FILE_TRANSFORMATION = ("File Transformation", "5e87cc92-571a-4d8d-8d98-d2d4147f9
                        "https://www.iamparadox.dev/jellyfin/plugins/manifest.json")
 JS_INJECTOR = ("JavaScript Injector", "f5a34f7b-2e8a-4e6a-a722-3a216a81b374",
                "https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/12/manifest.json")
-SEERR_REPORTER = ("Seerr Reporter", "6f3c1f4e-0d6b-4d2a-9a2b-1f5f9c7a8e21",
-                  "https://raw.githubusercontent.com/alberba/jellyfin-plugin-seerr-reporter/main/manifest.json")
 
 AUTH = 'MediaBrowser Client="Media Stack Wire", Device="wire", DeviceId="media-stack-wire", Version="1"'
 
 
 def wanted(cfg):
-    return {"abyss": cfg["jellyfin_abyss"], "seerr_reporter": cfg["jellyfin_seerr_reporter"]}
+    return {"abyss": cfg["jellyfin_abyss"]}
 
 
 def plugins_for(cfg):
-    """The plugins to install: File Transformation for either choice, since both
-    change the served web client without touching its files."""
-    chosen = []
-    if cfg["jellyfin_abyss"]:
-        chosen.append(JS_INJECTOR)
-    if cfg["jellyfin_seerr_reporter"]:
-        chosen.append(SEERR_REPORTER)
-    return [FILE_TRANSFORMATION] + chosen if chosen else []
+    """Abyss's Spotlight changes the served web client through plugins."""
+    return [FILE_TRANSFORMATION, JS_INJECTOR] if cfg["jellyfin_abyss"] else []
 
 
 def sign_in(base, cfg):
@@ -172,18 +163,6 @@ def configure_loader(client):
     return ["jellyfin: Spotlight loader added to JavaScript Injector"]
 
 
-def configure_reporter(client, cfg):
-    if not loaded(client, SEERR_REPORTER[1]):
-        return ["jellyfin: WARN Seerr Reporter not running yet, it is configured on the next run"]
-    path = f"/Plugins/{SEERR_REPORTER[1]}/Configuration"
-    conf = client.get(path)
-    if conf.get("ApiKey"):
-        return []
-    conf.update({"SeerrUrl": TOPOLOGY.url("jellyfin", "seerr"), "ApiKey": cfg["seerr_key"]})
-    client.post(path, conf)
-    return ["jellyfin: Seerr Reporter pointed at Seerr"]
-
-
 def restart(client, wait):
     client.post("/System/Restart")
     time.sleep(10)  # let it go down before waiting for it to answer again
@@ -210,6 +189,4 @@ def customize(base, cfg, ui_folder, fetch=download, wait=None):
         log += theme(client)
         log += spotlight_files(ui_folder, fetch)
         log += configure_loader(client)
-    if cfg["jellyfin_seerr_reporter"]:
-        log += configure_reporter(client, cfg)
     return log

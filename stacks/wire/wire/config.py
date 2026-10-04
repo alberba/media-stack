@@ -96,6 +96,5 @@ def load(environ, appdata="/appdata"):
         "jellyfin_user": get(environ, "JELLYFIN_ADMIN_USER"),
         "jellyfin_password": get(environ, "JELLYFIN_ADMIN_PASSWORD"),
         "jellyfin_abyss": on(environ, "JELLYFIN_ABYSS"),
-        "jellyfin_seerr_reporter": on(environ, "JELLYFIN_SEERR_REPORTER"),
         "qualities": [q.strip() for q in get(environ, "QUALITIES").split(",") if q.strip()],
     }

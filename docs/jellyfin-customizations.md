@@ -6,12 +6,11 @@ survives image updates and is covered by the `backup` Profile.
 
 ## Automatic (the Wiring)
 
-`scripts/setup.sh` asks two questions and writes them to `.env`:
+`scripts/setup.sh` asks whether to enable Abyss and writes the choice to `.env`:
 
 | `.env` | What the Wiring does on the next `docker compose up` |
 | --- | --- |
 | `JELLYFIN_ABYSS=on` | Abyss theme, dark theme and home order for every user, Spotlight banner |
-| `JELLYFIN_SEERR_REPORTER=on` | installs SeerrReporter and points it at Seerr |
 
 It signs in with `JELLYFIN_ADMIN_USER`/`JELLYFIN_ADMIN_PASSWORD`, adds the plugin
 repositories, installs what is missing and restarts Jellyfin once to load new plugins.
@@ -53,16 +52,24 @@ Dashboard > Plugins > Repositories > **+**, add:
 | --- | --- |
 | File Transformation | `https://www.iamparadox.dev/jellyfin/plugins/manifest.json` |
 | JavaScript Injector | `https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/12/manifest.json` |
-| SeerrReporter | `https://raw.githubusercontent.com/alberba/jellyfin-plugin-seerr-reporter/main/manifest.json` |
 
 Then, in the Catalog, install:
 
 - **File Transformation**: lets other plugins change the served web client without
   touching its files (the image's `jellyfin-web` is read-only for Jellyfin's user).
 - **JavaScript Injector**: runs custom scripts in the web client; Spotlight's loader.
-- **SeerrReporter** ([repo](https://github.com/alberba/jellyfin-plugin-seerr-reporter)):
-  Viewers report a problem with an item from Jellyfin, and it becomes an issue in Seerr.
-  In its settings, Seerr URL `http://seerr:5055` and Seerr's API key. With the `extras`
-  Profile, the issue-automator then acts on it.
 
 Restart Jellyfin (`docker compose restart jellyfin`) after installing plugins.
+
+### Removing SeerrReporter from an existing Instance
+
+Jellyfin Enhanced already provides Seerr issue reporting. To remove the duplicate:
+
+1. In Dashboard > Plugins > My Plugins, open **Seerr Reporter** and uninstall it.
+2. In Dashboard > Plugins > Repositories, remove the **Seerr Reporter** repository.
+3. Restart Jellyfin and reload Jellyfin Web with Ctrl+F5.
+4. Remove `JELLYFIN_SEERR_REPORTER` from the Instance's `.env` if present; the
+   Template no longer uses this setting.
+
+Keep File Transformation: Abyss and other plugins can still use it. The Wiring
+only installs missing customizations and does not uninstall existing plugins.

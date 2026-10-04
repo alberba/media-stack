@@ -483,7 +483,7 @@ class JellyfinExtras(Case):
         h[("GET", "/Plugins")] = lambda b: (200, [{"Id": g.replace("-", ""), "Status": "Active"} for g in st["plugins"]]
                                                  + [{"Id": g.replace("-", ""), "Status": "Restart"} for g in st["pending"]])
         h[("POST", "/System/Restart")] = lambda b: (self.restart(), (204, None))[1]
-        for _, guid, _ in (extras.FILE_TRANSFORMATION, extras.JS_INJECTOR, extras.SEERR_REPORTER):
+        for _, guid, _ in (extras.FILE_TRANSFORMATION, extras.JS_INJECTOR):
             path = f"/Plugins/{guid}/Configuration"
             h[("GET", path)] = lambda b, g=guid: (200, dict(st["conf"].get(g, {})))
             h[("POST", path)] = lambda b, g=guid: (st["conf"].update({g: b}), (204, None))[1]
@@ -551,11 +551,11 @@ class JellyfinExtras(Case):
 
     def test_a_second_run_changes_nothing(self):
         self.prefs_handlers()
-        self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_SEERR_REPORTER="on")
+        self.run_extras(JELLYFIN_ABYSS="on")
         changes = lambda: [c for c in self.jf.posts() if c[1] != "/Users/AuthenticateByName"]
         before = len(changes())
         self.fetched.clear()
-        self.assertEqual(self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_SEERR_REPORTER="on"), [])
+        self.assertEqual(self.run_extras(JELLYFIN_ABYSS="on"), [])
         self.assertEqual(len(changes()), before)
         self.assertEqual(self.fetched, [])
 
@@ -570,21 +570,6 @@ class JellyfinExtras(Case):
         self.assertEqual(extras.abyss_css(self.state["css"]).count(extras.CSS_START), 1)
         self.assertIn(extras.ABYSS_VERSION, extras.abyss_css(self.state["css"]))
         self.assertTrue(extras.abyss_css(self.state["css"]).endswith("\nbody {}"))
-
-    def test_seerr_reporter_gets_seerr_and_its_key(self):
-        log = self.run_extras(JELLYFIN_SEERR_REPORTER="on")
-        conf = self.state["conf"][extras.SEERR_REPORTER[1]]
-        self.assertEqual((conf["SeerrUrl"], conf["ApiKey"]), ("http://seerr:5055", "e" * 32))
-        self.assertEqual({r["Url"] for r in self.state["repos"]}, {extras.FILE_TRANSFORMATION[2], extras.SEERR_REPORTER[2]})
-        self.assertNotIn("/System/Configuration/branding", [c[1] for c in self.jf.posts()])
-        self.assertIn("jellyfin: Seerr Reporter pointed at Seerr", log)
-
-    def test_a_configured_seerr_reporter_keeps_its_key(self):
-        self.state["plugins"] = [extras.FILE_TRANSFORMATION[1], extras.SEERR_REPORTER[1]]
-        self.state["repos"] = [{"Url": extras.FILE_TRANSFORMATION[2]}, {"Url": extras.SEERR_REPORTER[2]}]
-        self.state["conf"][extras.SEERR_REPORTER[1]] = {"SeerrUrl": "http://other:5055", "ApiKey": "mine"}
-        self.assertEqual(self.run_extras(JELLYFIN_SEERR_REPORTER="on"), [])
-        self.assertEqual(self.state["restarts"], 0)
 
     def test_skipped_without_an_admin_login(self):
         log = self.run_extras(JELLYFIN_ABYSS="on", JELLYFIN_ADMIN_PASSWORD="")

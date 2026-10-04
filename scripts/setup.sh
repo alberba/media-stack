@@ -408,16 +408,13 @@ ask_app_connections() {
 # Optional Jellyfin customizations (docs/jellyfin-customizations.md): the Wiring applies them.
 ask_jellyfin_extras() {
   section "Jellyfin customizations (optional)"
-  local key label default
-  for key in JELLYFIN_ABYSS JELLYFIN_SEERR_REPORTER; do
-    case "$key" in
-      JELLYFIN_ABYSS) label="Apply the Abyss theme to Jellyfin (dark, Spotlight home banner)?" ;;
-      JELLYFIN_SEERR_REPORTER) label="Install SeerrReporter (Viewers report playback problems as Seerr issues)?" ;;
-    esac
-    default=n
-    [ "$(get_env "$key")" != on ] || default=y
-    if confirm "$label" "$default"; then set_env "$key" on; else set_env "$key" off; fi
-  done
+  local default=n
+  [ "$(get_env JELLYFIN_ABYSS)" != on ] || default=y
+  if confirm "Apply the Abyss theme to Jellyfin (dark, Spotlight home banner)?" "$default"; then
+    set_env JELLYFIN_ABYSS on
+  else
+    set_env JELLYFIN_ABYSS off
+  fi
 }
 
 ask_telegram() {
