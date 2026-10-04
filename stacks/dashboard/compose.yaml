@@ -2,7 +2,7 @@
 # for compose stacks).
 services:
   homarr:
-    image: ghcr.io/homarr-labs/homarr:v1.77.2
+    image: ghcr.io/homarr-labs/homarr:v2.1.1
     container_name: homarr
     profiles: [dashboard]
     restart: unless-stopped
