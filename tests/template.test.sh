@@ -66,6 +66,26 @@ test_core_config_is_valid() {
   assert_status 0
 }
 
+test_gluetun_control_server_uses_the_instance_api_key_for_all_routes() {
+  local json
+  json="$(compose config --format json)" || fail "Compose config failed"
+  python3 -c '
+import json, sys
+service = json.load(sys.stdin)["services"]["gluetun"]
+role = json.loads(service["environment"].get("HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE", "{}"))
+assert role == {"auth": "apikey", "apikey": "0" * 64}, "control server has no default API key role"
+assert service["environment"]["HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH"] == "/dev/null", "persisted roles can override API key protection"
+assert not any(str(p.get("published")) == "8000" for p in service["ports"]), "control server exposed on the host"
+' <<< "$json" || fail "Gluetun control server is not protected"
+}
+
+test_compose_rejects_an_empty_gluetun_control_key() {
+  sed -i 's/^GLUETUN_CONTROL_API_KEY=.*/GLUETUN_CONTROL_API_KEY=/' "$SANDBOX/.env"
+  OUTPUT="$(compose config -q 2>&1)"; STATUS=$?
+  [ "$STATUS" != 0 ] || fail "Compose accepted an empty Gluetun API key"
+  assert_output_contains "GLUETUN_CONTROL_API_KEY"
+}
+
 test_core_has_exactly_the_core_services() {
   local services
   services="$(compose config --services | sort | xargs)"

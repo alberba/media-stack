@@ -12,6 +12,11 @@ services:
       - /dev/net/tun:/dev/net/tun
     environment:
       TZ: ${TZ:?set TZ in .env}
+      # One API key role covers every control server route.
+      HTTP_CONTROL_SERVER_AUTH_DEFAULT_ROLE: >-
+        {"auth":"apikey","apikey":"${GLUETUN_CONTROL_API_KEY:?run scripts/init.sh to generate GLUETUN_CONTROL_API_KEY in .env}"}
+      # Ignore any legacy roles in the persisted /gluetun/auth/config.toml.
+      HTTP_CONTROL_SERVER_AUTH_CONFIG_FILEPATH: /dev/null
       VPN_SERVICE_PROVIDER: ${VPN_SERVICE_PROVIDER:?set VPN_SERVICE_PROVIDER in .env}
       VPN_TYPE: ${VPN_TYPE:?set VPN_TYPE in .env}
       WIREGUARD_PRIVATE_KEY: ${WIREGUARD_PRIVATE_KEY:-}

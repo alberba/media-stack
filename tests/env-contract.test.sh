@@ -19,6 +19,15 @@ test_worker_requires_its_server_address() {
   assert_output_contains "TDARR_SERVER_IP"
 }
 
+test_gluetun_control_key_rejects_json_injection_without_printing_the_secret() {
+  local key='x","auth":"none'
+  printf '%s' "$key" | python3 "$REPO/scripts/env_contract.py" set --file "$SANDBOX/.env" --name GLUETUN_CONTROL_API_KEY
+  OUTPUT="$(python3 "$REPO/scripts/env_contract.py" validate --file "$SANDBOX/.env" 2>&1)"; STATUS=$?
+  assert_status 1
+  assert_output_contains 'GLUETUN_CONTROL_API_KEY must be 64 hex characters'
+  assert_output_not_contains "$key"
+}
+
 test_unknown_and_duplicate_instance_settings_warn_without_blocking() {
   printf 'TZ=Europe/Brussels\nOPERATOR_EXTENSION=enabled\n' >> "$SANDBOX/.env"
   OUTPUT="$(python3 "$REPO/scripts/env_contract.py" validate --file "$SANDBOX/.env" 2>&1)"; STATUS=$?
