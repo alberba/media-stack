@@ -1,5 +1,11 @@
 # Investigación: auto-wiring de apps en el primer arranque (#9)
 
+**Estado: investigación histórica, sustituida por la implementación.** Los
+endpoints, variables y categorías siguientes describen la propuesta del
+2026-09-30; no son un contrato vigente. Para modificar Wiring, empieza por
+[el mapa de navegación](../agents/navigation.md), [la guía actual](../wiring.md),
+[steps.py](../../stacks/wire/wire/steps.py) y [ADR-0002](../adr/0002-wiring-only-seeds.md).
+
 Fecha: 2026-09-30. Solo fuentes primarias (código fuente en GitHub, READMEs oficiales, API de releases de GitHub). Las rutas de código apuntan a la rama por defecto en la fecha indicada; los números de línea pueden desplazarse.
 
 ## 1. Jellyfin: asistente de inicio por API

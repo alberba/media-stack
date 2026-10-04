@@ -11,9 +11,18 @@ if command -v gitleaks >/dev/null 2>&1; then
   exec gitleaks git --pre-commit --staged --redact --no-banner "$root"
 fi
 if command -v docker >/dev/null 2>&1; then
-  exec docker run --rm -v "$root:/repo" -w /repo \
+  # Preserve absolute paths: linked worktrees refer to the common Git directory
+  # through a .git file, and Git also keeps a backlink to the worktree.
+  common="$(git rev-parse --path-format=absolute --git-common-dir)"
+  git_dir="$(git rev-parse --absolute-git-dir)"
+  mounts=(--mount "type=bind,src=$root,dst=$root,readonly")
+  [ "$common" = "$root" ] || mounts+=(--mount "type=bind,src=$common,dst=$common,readonly")
+  if [ "$git_dir" != "$common" ] && [[ "$git_dir" != "$common/"* ]]; then
+    mounts+=(--mount "type=bind,src=$git_dir,dst=$git_dir,readonly")
+  fi
+  exec docker run --rm "${mounts[@]}" -w "$root" \
     -e GIT_CONFIG_COUNT=1 -e GIT_CONFIG_KEY_0=safe.directory -e GIT_CONFIG_VALUE_0='*' \
-    "$GITLEAKS_IMAGE" git --pre-commit --staged --redact --no-banner /repo
+    "$GITLEAKS_IMAGE" git --pre-commit --staged --redact --no-banner "$root"
 fi
 echo "pre-commit: install gitleaks or Docker to scan for secrets (https://github.com/gitleaks/gitleaks)." >&2
 exit 1

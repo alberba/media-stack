@@ -65,6 +65,42 @@ Then, in the Catalog, install:
 
 Restart Jellyfin (`docker compose restart jellyfin`) after installing plugins.
 
+### Requests inside Jellyfin Web
+
+This is a manual customization, separate from automatic Wiring. The Operator
+confirmed access through Plugin Pages on 2026-10-04. Choose plugin builds compatible
+with the Jellyfin version in [Compose](../stacks/jellyfin/compose.yaml).
+
+1. Add the Enhanced repository
+   `https://raw.githubusercontent.com/n00bcodr/jellyfin-plugins/main/12/manifest.json`
+   for Jellyfin 12. Install **Jellyfin Enhanced**, **File Transformation** and
+   **Plugin Pages**. The latter two use the IAmParadox repository listed above.
+   Restart Jellyfin. [Enhanced installation](https://n00bcodr.github.io/Jellyfin-Enhanced/installation/installation/),
+   [Plugin Pages installation](https://github.com/IAmParadox27/jellyfin-plugin-pages#installation).
+2. In Seerr, enable **Settings → Users → Enable Jellyfin Sign-In**, then import
+   the intended Jellyfin accounts from **Users → Import Jellyfin Users**.
+   In **Dashboard → Plugins → Jellyfin Enhanced → Seerr Settings**, enter
+   `http://seerr:5055` and the key from Seerr's **Settings → General → API Key**.
+   Use **Test Connection**, then save.
+   [Connection setup](https://n00bcodr.github.io/Jellyfin-Enhanced/seerr/seerr-settings/#setup).
+3. In that same tab, select **Enable Requests Page** and **Use Plugin Pages**.
+   Enable **Show Downloads in Requests Page** if wanted; configure Radarr/Sonarr
+   URLs and API keys in Enhanced's *arr settings for that section.
+   [Download prerequisites](https://n00bcodr.github.io/Jellyfin-Enhanced/seerr/seerr-settings/#show-downloads-section).
+4. Save, restart Jellyfin and reload Jellyfin Web (`Ctrl+F5` or `Cmd+Shift+R`).
+   In Jellyfin 12, open **Requests** from the user profile menu. The direct route is
+   `/web/index.html#!/jellyfinenhanced/requests`.
+   [Requests setup and access](https://n00bcodr.github.io/Jellyfin-Enhanced/seerr/seerr-features/#requests-page).
+
+If the link is missing, check Plugin Pages is loaded, **Use Plugin Pages** is
+saved and Jellyfin restarted. If requests are missing, test the Seerr connection
+and check the Viewer has a linked Seerr account. Keep `DownloadsFilterByUserRequests`
+enabled for personal download filtering. Before relying on personal visibility,
+test two Viewers without Seerr's `REQUEST_VIEW`/`MANAGE_REQUESTS` permissions;
+that isolation test is still pending. This recipe covers Jellyfin Web; native TV
+and mobile clients need separate verification. See the
+[research and validation status](research/viewer-request-status.md).
+
 ### Removing SeerrReporter from an existing Instance
 
 Jellyfin Enhanced already provides Seerr issue reporting. To remove the duplicate:

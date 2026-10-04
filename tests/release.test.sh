@@ -7,7 +7,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 setup() {
   SANDBOX="$(mktemp -d)"
   mkdir -p "$SANDBOX/repo/scripts" "$SANDBOX/repo/tests" "$SANDBOX/repo/docs/releases" "$SANDBOX/repo/worker" "$SANDBOX/bin"
-  cp "$REPO/scripts/release.sh" "$SANDBOX/repo/scripts/"
+  cp "$REPO/scripts/release.sh" "$REPO/scripts/check.sh" "$SANDBOX/repo/scripts/"
+  mkdir "$SANDBOX/repo/env"
+  printf '{}\n' > "$SANDBOX/repo/env/catalog.json"
   cat > "$SANDBOX/repo/scripts/env_contract.py" <<'SCRIPT'
 import sys
 if sys.argv[1] == "fixture":
@@ -26,7 +28,8 @@ SCRIPT
 if [[ "$*" == *'config --profiles'* ]]; then printf 'backup\nvo\n'; fi
 exit "${COMPOSE_FAIL:-0}"
 SCRIPT
-  chmod +x tests/*.sh "$SANDBOX/bin/docker"
+  printf '#!/usr/bin/env bash\nexit 0\n' > "$SANDBOX/bin/shellcheck"
+  chmod +x tests/*.sh "$SANDBOX/bin/docker" "$SANDBOX/bin/shellcheck"
   cat > docs/releases/v1.0.0.md <<'NOTES'
 # v1.0.0
 Breaking changes: no
@@ -63,5 +66,38 @@ test_compose_failure_does_not_create_tag() {
   run_release
   assert_status 1
   [ -z "$(git tag)" ] || fail 'tagged invalid Compose'
+}
+test_ci_skips_real_app_wiring_but_runs_other_tests() {
+  printf 'exit 37\n' > tests/wire-integration.test.sh
+  OUTPUT="$(bash scripts/check.sh ci 2>&1)"; STATUS=$?
+  assert_status 0
+  export TEST_FAIL=1
+  OUTPUT="$(bash scripts/check.sh ci 2>&1)"; STATUS=$?
+  assert_status 1
+}
+test_release_includes_real_app_wiring_and_preserves_failure_status() {
+  printf 'exit 37\n' > tests/wire-integration.test.sh
+  git add tests/wire-integration.test.sh; git commit -qm 'integration fixture'
+  run_release
+  assert_status 37
+  [ -z "$(git tag)" ] || fail 'tagged failing real-app integration'
+}
+test_lint_failure_does_not_create_tag() {
+  printf '#!/usr/bin/env bash\nexit 13\n' > "$SANDBOX/bin/shellcheck"
+  run_release
+  assert_status 13
+  [ -z "$(git tag)" ] || fail 'tagged failing lint'
+}
+test_fast_checks_do_not_run_app_tests() {
+  export TEST_FAIL=1
+  OUTPUT="$(bash scripts/check.sh fast 2>&1)"; STATUS=$?
+  assert_status 0
+}
+test_full_checks_reject_macos_before_running_tests() {
+  printf '#!/usr/bin/env bash\nprintf "Darwin\\n"\n' > "$SANDBOX/bin/uname"
+  chmod +x "$SANDBOX/bin/uname"
+  OUTPUT="$(bash scripts/check.sh ci 2>&1)"; STATUS=$?
+  assert_status 1
+  assert_output_contains 'require Linux/GNU utilities'
 }
 run_tests

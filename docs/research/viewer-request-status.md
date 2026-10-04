@@ -1,5 +1,10 @@
 # Seguimiento de solicitudes para Espectadores (#24)
 
+**Estado: investigación y propuesta parcial.** SeerrReporter ya se retiró; el
+acceso a Requests con Plugin Pages se confirmó el 2026-10-04. La receta operativa
+está en [personalizaciones de Jellyfin](../jellyfin-customizations.md#requests-inside-jellyfin-web).
+Las notificaciones y el aislamiento entre dos Espectadores siguen pendientes de validación.
+
 Fecha: 2026-10-03. Investigación del código de Seerr **v3.5.0**, la versión fijada por la [Plantilla](../../stacks/seerr/compose.yaml), y de documentación oficial. No se han ejecutado pruebas de entrega de notificaciones ni de aislamiento entre Espectadores en una Instancia en vivo.
 
 ## Conclusión

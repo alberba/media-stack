@@ -110,13 +110,11 @@ docs/                   guías (.md en español, .en.md en inglés)
 No se puede subir nada propio de una Instancia (ver `docs/adr/0001`). El `.gitignore` es
 una lista blanca, y gitleaks revisa cada commit y cada push.
 
-```sh
-git config core.hooksPath .githooks   # hook pre-commit de gitleaks (gitleaks o Docker)
-tests/template.test.sh && tests/init.test.sh && tests/verify.test.sh && tests/hooks.test.sh
-tests/topology.test.sh && tests/wire.test.sh   # resolución de direcciones y conexiones entre apps
-tests/issue-automator.test.sh && tests/tdarr-plugin.test.sh   # necesitan python3, y node o Docker
-tests/backup.test.sh && tests/backup-image.test.sh   # necesitan sqlite3 y Docker
-```
+Las comprobaciones locales, los requisitos de Linux y las diferencias entre CI y
+la integración con apps reales están en [la guía de pruebas](docs/agents/testing.md).
+Empieza por `scripts/check.sh fast`; usa `scripts/check.sh ci` para validar el
+conjunto de CI. El [mapa de navegación](docs/agents/navigation.md) enlaza las
+fuentes de cada área y sus pruebas.
 
 Las versiones de las imágenes están fijadas; [Renovate](https://github.com/apps/renovate)
 abre PRs para subirlas.
