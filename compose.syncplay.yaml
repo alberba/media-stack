@@ -1,0 +1,8 @@
+# Opt-in compatibility for Jellyfin Android: use the web player in SyncPlay.
+# Build on the exact same image as the Core, without changing App data.
+services:
+  jellyfin:
+    image: media-stack-jellyfin-syncplay:local
+    build:
+      context: stacks/jellyfin
+      dockerfile: Dockerfile

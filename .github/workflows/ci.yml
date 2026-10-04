@@ -34,6 +34,7 @@ jobs:
           docker compose config --quiet
           docker compose --profile '*' config --quiet
           COMPOSE_FILE=compose.yaml:compose.gpu.yaml docker compose --profile '*' config --quiet
+          COMPOSE_FILE=compose.yaml:compose.gpu.yaml:compose.syncplay.yaml docker compose config --quiet
       - name: Validate the Worker's compose
         run: |
           python3 scripts/env_contract.py fixture --scope worker > worker/.env
@@ -67,6 +68,8 @@ jobs:
         run: tests/issue-automator.test.sh
       - name: transcode Profile Tdarr plugin tests
         run: tests/tdarr-plugin.test.sh
+      - name: Jellyfin Android SyncPlay web player tests
+        run: bash tests/syncplay.test.sh
       - name: Build the locally built Profile images
         run: docker compose --profile '*' build
       - name: Install sqlite3 for the backup tests

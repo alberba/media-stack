@@ -8,6 +8,7 @@
 !/.env.example
 !/compose.yaml
 !/compose.gpu.yaml
+!/compose.syncplay.yaml
 !/LICENSE
 !/README*.md
 !/CONTEXT.md
@@ -23,6 +24,7 @@
 !/stacks/*/*/*.py
 !/stacks/wire/wire/topology.json
 !/stacks/transcode/plugins/*.js
+!/stacks/jellyfin/web/*.js
 # The Worker: its own compose project, run on the Worker, not on the Instance.
 !/worker/compose.yaml
 !/worker/*.example
@@ -32,6 +34,7 @@
 !/env/catalog.json
 !/env/*.template
 !/tests/*.sh
+!/tests/syncplay-web-player.test.cjs
 !/tests/topology-compose.py
 !/docs/**/*.md
 !/examples/**/*.example

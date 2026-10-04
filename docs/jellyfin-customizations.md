@@ -4,6 +4,10 @@ The theme and plugins the author's Instance uses. None of this is needed. Nothin
 written inside the Jellyfin image: everything lives in Jellyfin's App data, so it
 survives image updates and is covered by the `backup` Profile.
 
+For SyncPlay on Android with an integrated or external player preference, see the
+optional [web player compatibility image](syncplay.md). It selects the web player
+automatically while joining a group and retains the normal playback preference.
+
 ## Automatic (the Wiring)
 
 `scripts/setup.sh` asks whether to enable Abyss and writes the choice to `.env`:

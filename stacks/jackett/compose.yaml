@@ -3,7 +3,7 @@
 # and their cookies live in its App data, never in this repo. Setup: docs/profiles.md.
 services:
   jackett:
-    image: lscr.io/linuxserver/jackett:v0.24.2581-ls27
+    image: lscr.io/linuxserver/jackett:v0.24.2788-ls48
     container_name: jackett
     profiles: [jackett]
     restart: unless-stopped
