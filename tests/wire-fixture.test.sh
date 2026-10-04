@@ -23,9 +23,10 @@ test_seerr_image_can_write_to_its_fixture() {
   prepare_seerr || fail 'Seerr fixture preparation failed'
   OUTPUT="$(docker run --rm --network none --entrypoint node \
     -v "$WORK/appdata/seerr:/app/config" "$(image seerr)" \
-    -e 'require("fs").writeFileSync("/app/config/probe", "ok")' 2>&1)"; STATUS=$?
+    -e 'const fs = require("fs"); fs.writeFileSync("/app/config/probe", "ok"); process.stdout.write(fs.readFileSync("/app/config/probe", "utf8"))' 2>&1)"; STATUS=$?
   assert_status 0
-  assert_file_contains "$WORK/appdata/seerr/probe" ok
+  # The private directory belongs to node, not the non-root CI runner.
+  [ "$OUTPUT" = ok ] || fail "Seerr did not read back its fixture file: $OUTPUT"
 }
 test_failure_saves_redacted_logs_before_removing_containers() {
   local secret
