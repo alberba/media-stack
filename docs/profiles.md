@@ -108,10 +108,70 @@ these UIs off the internet (see [proxy](#proxy)).
      key and the token it shows into `BESZEL_AGENT_KEY` and `BESZEL_AGENT_TOKEN`.
   3. `docker compose up -d beszel-agent`. The agent keeps restarting until then.
 - **What's Up Docker** (`http://<host>:3000`): lists containers with a newer image, and
-  sends a Telegram message when it finds one (with `TELEGRAM_BOT_TOKEN` and
-  `TELEGRAM_CHAT_ID`). Log in with `WUD_ADMIN_USER` and `WUD_ADMIN_PASSWORD`; it checks at
+  sends a Telegram message for major version changes (with `TELEGRAM_BOT_TOKEN` and
+  `TELEGRAM_CHAT_ID`). Minor/patch changes and digest-only rebuilds do not notify.
+  Tags it cannot parse as SemVer can still notify despite the major filter.
+  Log in with `WUD_ADMIN_USER` and `WUD_ADMIN_PASSWORD`; it checks at
   `WUD_CRON`. The Template's own images are bumped by Renovate; this one shows what your
   Instance actually runs.
+- **Trivy security monitor** (`security-monitor`): reads available image updates from
+  WUD using `WUD_ADMIN_USER`/`WUD_ADMIN_PASSWORD` on `SECURITY_SCAN_CRON` (default
+  06:00 in `TZ`). Compares each running image with its published candidate, using
+  the same vulnerability database and the host's architecture. Candidates are
+  scanned directly from the registry without installing them in Docker.
+  Sends one Telegram digest only when a candidate corrects HIGH/CRITICAL CVEs found
+  in the running image. CVEs repeated across packages are counted once per image.
+  Existing vulnerabilities alone, a package fix without an image update, and
+  candidates still affected by the CVE do not notify. A correction requires all
+  affected packages to remain inventoried with changed versions and the CVE to be
+  absent at every severity; missing metadata or EOL coverage is not proof of a fix.
+  This conservative check can miss fixes that remove a dependency entirely.
+  Auto-updates are off by default. The same correction is not repeated while that image is
+  running, even if later tags also fix it. Failed deliveries remain pending; failed
+  comparisons never generate a correction alert. Cache, full reports, comparisons,
+  notification history and `last-status.json` live under `APPDATA_ROOT/security-monitor`.
+  Detection depends on image package metadata and does not cover all app advisories.
+  The service is limited to 768 MB RAM and one CPU;
+  temporary scan files use its disk-backed App data folder.
+  Run now with `docker compose exec security-monitor python3 /app/main.py run`.
+  For optional host-side automatic security updates, see below.
+
+### Automatic security updates
+
+On a systemd Linux host, opt in with `sudo scripts/security-update.sh install`.
+This enables `SECURITY_AUTO_UPDATE=on` in the Instance `.env`, installs a daily timer
+at the hour/minute in `SECURITY_SCAN_CRON` and `TZ`, and runs recovery at boot.
+Automatic mode requires a daily cron such as `0 6 * * *`. The host runs the whole
+scan/update cycle; the scanner container's internal cron is idle in this mode.
+
+Only verified security corrections within the same major version are eligible.
+Prereleases, unclassified versions, candidates introducing/escalating HIGH/CRITICAL
+CVEs, locally built images, apps without a working healthcheck, network namespace
+owners with dependent containers, shared App data writers and configuration drift
+remain manual. Candidates are installed by the exact registry digest Trivy scanned;
+the downloaded image ID must match the report.
+
+Each eligible app is stopped and its writable App data directories are archived
+before Compose recreates it. Backup's run lock prevents simultaneous backup runs.
+The new image must stay healthy for 30 seconds within a five-minute startup window;
+WUD's API is also checked. Failure restores the previous image and App data.
+An interrupted deployment leaves a recovery journal; recovery runs before another
+update, and systemd retries failed runs. A failed rollback blocks further updates.
+Failed App data and the original archives are retained under `security-monitor/transactions`.
+This recovery covers App data, not changes to media files or external systems.
+
+Installed image pins live in `APPDATA_ROOT/security-monitor/images.compose.json`,
+appended to `.env`'s `COMPOSE_FILE`, so subsequent `docker compose up` keeps them.
+Pins override bundled Template image versions: review them when upgrading the
+Template or applying a major manually. Telegram reports update, rollback or manual
+review outcomes; failed deliveries are queued. A failed image is not retried
+automatically for the same service/image ID; inspect `attempted-updates.json` before
+clearing its record for a deliberate retry.
+
+Run a cycle with `sudo scripts/security-update.sh run`; inspect it with
+`systemctl status media-stack-security-updates.service` and
+`systemctl list-timers media-stack-security-updates.timer`. To return to notifications
+only, use `sudo scripts/security-update.sh disable`; the installed image pins remain.
 
 ## proxy
 

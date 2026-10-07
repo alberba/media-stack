@@ -68,7 +68,7 @@ services:
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/bazarr:/config
       - ${DATA_ROOT:?set DATA_ROOT in .env}/media:/data/media
     healthcheck:
-      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:6767 || exit 1"]
+      test: ["CMD-SHELL", "curl -fso /dev/null http://localhost:6767 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3
