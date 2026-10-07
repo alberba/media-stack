@@ -85,7 +85,7 @@ services:
       start_period: 30s
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:2.6.5.5623-ls162
+    image: lscr.io/linuxserver/prowlarr:2.6.5.5623-ls163
     container_name: prowlarr
     restart: unless-stopped
     network_mode: service:gluetun
