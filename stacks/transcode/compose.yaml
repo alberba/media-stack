@@ -4,7 +4,7 @@
 # To also give Tdarr the host's GPU, use the override in compose.gpu.yaml.
 services:
   tdarr:
-    image: ghcr.io/haveagitgat/tdarr:2.94.02
+    image: ghcr.io/haveagitgat/tdarr:2.96.01
     container_name: tdarr
     profiles: [transcode]
     restart: unless-stopped
