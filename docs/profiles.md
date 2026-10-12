@@ -70,6 +70,9 @@ The indexers, their logins and cookies live in `APPDATA_ROOT/jackett` (covered b
   `http://sonarr:8989`. It sees downloads at `/data/torrents`, the same path as
   qBittorrent.
 
+Las políticas de seeding para públicos y privados y los ejemplos de qui están en
+[las reglas de compresión y protección de torrents](transcode-rules.md), en español.
+
 ## cleanup
 
 Maintainerr (`http://<host>:6246`) deletes library items by rules you write (e.g. watched

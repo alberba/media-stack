@@ -64,7 +64,7 @@ Optional groups of services on top of the Core, turned on with `COMPOSE_PROFILES
 | `proxy` | Nginx Proxy Manager, to publish Jellyfin and Seerr (and, carefully, some Operator apps) on the internet. See [docs/security.en.md](docs/security.en.md). |
 | `remote` | Tailscale, with the LAN as an optional subnet route. |
 | `extras` | issue-automator (acts on Seerr issues), mousehole, a Tor proxy and File Browser. |
-| `transcode` | Tdarr server, for a Worker with a GPU to re-encode large files that are no longer seeding. See [docs/transcode.md](docs/transcode.md). |
+| `transcode` | Tdarr server, for a Worker with a GPU to re-encode large videos, skipping files with multiple hardlinks. See [docs/transcode.md](docs/transcode.md) (Spanish). |
 
 Hardware transcoding with the host's GPU (`/dev/dri`) for Jellyfin and Tdarr is an
 override, `compose.gpu.yaml`, turned on with `COMPOSE_FILE` in `.env`.
