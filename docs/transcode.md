@@ -68,6 +68,110 @@ mínimo configurado de 10 GiB. Comprobar las unidades y las desigualdades del pl
 `Check File Size`; su condición no tiene por qué coincidir exactamente con la del
 plugin clásico en el límite del tamaño.
 
+### Evitar comprimir otra vez el mismo resultado
+
+El plugin clásico NVENC fuerza la recodificación incluso de HEVC y no guarda una
+marca de «ya comprimido». `reQueueAfter: false` no protege una nueva ejecución del
+Flow. Añadir los plugins comunitarios oficiales
+[`Check Skiplist`](https://github.com/HaveAGitGat/Tdarr_Plugins/blob/master/FlowPluginsTs/CommunityFlowPlugins/tools/processedCheck/1.0.0/index.ts)
+y
+[`Add To Skiplist`](https://github.com/HaveAGitGat/Tdarr_Plugins/blob/master/FlowPluginsTs/CommunityFlowPlugins/tools/processedAdd/1.0.0/index.ts):
+
+```text
+Input File → Check File Size → Check For Hardlinks → Check Skiplist
+                                                      ├─ 2: registrado → Terminar
+                                                      └─ 1: nuevo → Elegir encoder
+                                                                      ↓
+                                                                  Codificar
+                                                                      ↓
+                                                              Check File Changed
+                                                      ├─ 2: sin cambios → Terminar
+                                                      └─ 1: cambiado → Replace Original File
+                                                                      ↓
+                                                               Add To Skiplist
+```
+
+Las salidas de tamaño excluido y de varios hardlinks también terminan sin
+codificar. Configurar **Check Type = `fileHash`** en ambos pasos de Skiplist y
+**File To Add = `workingFile`** en `Add To Skiplist`. Se registra el contenido del
+resultado después del reemplazo; una descarga diferente con la misma ruta sigue
+siendo candidata. `Check File Changed` evita registrar como comprimido un archivo
+que el plugin clásico omitió. Compartir estos pasos entre todas las ramas de GPU.
+
+La huella SHA-256 requiere leer el archivo completo desde el Worker. Por eso la
+consulta se coloca después de los filtros de tamaño y hardlinks. Los registros
+persisten en los Datos de las apps de Tdarr y se consultan en Libraries → Skiplist;
+borrarlos permite procesar de nuevo ese contenido. El Flow debe configurarse en
+cada Instancia: Wiring no lo crea automáticamente.
+
+La protección no registra retroactivamente los resultados anteriores. Antes de
+añadirlos, contrastar el historial de transcodificación correcta con el tamaño y
+la fecha de modificación actuales, y registrar la huella del resultado existente.
+Estar en HEVC o figurar como «Not required» no demuestra que se haya comprimido.
+
+Validación en Tdarr 2.94.02: una prueba aislada del grafo activo, usando los plugins
+reales de Skiplist y un encoder simulado, reprodujo dos codificaciones antes del
+cambio y una después. Las ramas NVENC y VAAPI verificaron que una descarga diferente vuelve a ser
+candidata y que los originales omitidos no entran en Skiplist. No sustituye la
+verificación de un trabajo completo en el Worker.
+
+### Revisar los archivos omitidos cuando desaparezca otro hardlink
+
+Un archivo omitido por hardlinks puede quedar en «Not required» aunque después
+se elimine el archivo de descarga. `Find New` no garantiza que vuelva a ejecutar
+el Flow para ese archivo. El script
+[`recheck.py`](../stacks/transcode/recheck-hardlinks/recheck.py) revisa estos casos
+desde la Instancia, con acceso local a la Biblioteca y los Datos de las apps:
+
+- Selecciona vídeos de la biblioteca indicada en «Not required», con varios
+  enlaces registrados y al menos 10 GiB, por defecto.
+- Exige que el último informe de transcodificación registre una omisión por
+  hardlinks. Si falta el informe, no vuelve a encolar el archivo automáticamente.
+- Consulta `stat` localmente. Solo acepta archivos con un enlace, todavía por
+  encima del mínimo y con tamaño y fecha de modificación iguales a los registrados.
+- Comprueba otra vez el estado y que el archivo no esté en staging antes de cambiar
+  únicamente `TranscodeDecisionMaker` a `Queued` mediante la
+  [API de Tdarr](https://tdarr.readme.io/reference/post_cruddb).
+
+El script lee SQLite en modo de solo lectura y consulta metadatos del sistema de
+archivos; no lee el contenido de los vídeos ni vuelve a escanear toda la Biblioteca.
+El Worker ejecutará el Flow habitual al recibir el trabajo, incluida su protección
+de hardlinks y Skiplist. Los archivos ya comprimidos no se seleccionan para esta
+revisión. Una descarga que haya cambiado el tamaño o la fecha requiere su escaneo
+normal, porque el historial anterior ya no demuestra por qué se omitió.
+
+Ejecutar primero sin `--apply` para obtener los contadores sin cambiar la cola:
+
+```sh
+python3 stacks/transcode/recheck-hardlinks/recheck.py \
+  --tdarr-data-root /ruta/appdata/tdarr/server/Tdarr \
+  --media-root /ruta/data/media \
+  --library-id ID_DE_LA_BIBLIOTECA
+```
+
+`--server-media-root` vale `/data/media`; `--api-url` vale
+`http://127.0.0.1:8265`. Si la API exige autenticación, proporcionar
+`TDARR_API_KEY` mediante el entorno. Ajustar `--min-size-gib` cuando cambie el
+mínimo del Flow.
+
+Para programarlo cada hora, adaptar las rutas y el ID en el
+[servicio de ejemplo](../examples/tdarr/hardlink-recheck.service.example), copiarlo
+a `/etc/systemd/system/media-stack-tdarr-hardlinks.service` y copiar el
+[timer](../examples/tdarr/hardlink-recheck.timer.example) a
+`/etc/systemd/system/media-stack-tdarr-hardlinks.timer`. Después:
+
+```sh
+sudo systemctl daemon-reload
+sudo systemctl start media-stack-tdarr-hardlinks.service
+sudo systemctl enable --now media-stack-tdarr-hardlinks.timer
+systemctl list-timers media-stack-tdarr-hardlinks.timer
+journalctl -u media-stack-tdarr-hardlinks.service -n 10
+```
+
+El timer también revisa cinco minutos después de arrancar. Un bloqueo evita
+ejecuciones simultáneas. Este mecanismo revisa archivos ya conocidos; la vigilancia
+de carpetas o `Find New` siguen siendo necesarios para descubrir descargas nuevas.
+
 ### Dónde se ejecuta cada paso
 
 Los pasos los ejecuta el Worker del nodo que recibe el trabajo, con sus rutas y su

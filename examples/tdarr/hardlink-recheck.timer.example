@@ -1,0 +1,10 @@
+[Unit]
+Description=Check Tdarr hardlinks hourly
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1h
+Unit=media-stack-tdarr-hardlinks.service
+
+[Install]
+WantedBy=timers.target
