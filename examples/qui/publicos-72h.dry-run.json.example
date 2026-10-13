@@ -1,0 +1,36 @@
+{
+  "name": "Públicos — retirar tras 72 h de seeding",
+  "trackerPattern": "*",
+  "enabled": false,
+  "dryRun": true,
+  "notify": false,
+  "intervalSeconds": 900,
+  "conditions": {
+    "schemaVersion": "1",
+    "delete": {
+      "enabled": true,
+      "mode": "deleteWithFilesPreserveCrossSeeds",
+      "condition": {
+        "operator": "AND",
+        "conditions": [
+          {
+            "field": "PRIVATE",
+            "operator": "EQUAL",
+            "value": "false"
+          },
+          {
+            "field": "SEEDING_TIME",
+            "operator": "GREATER_THAN_OR_EQUAL",
+            "value": "259200"
+          },
+          {
+            "field": "CROSS_SEED_TAGS",
+            "operator": "NOT_EQUAL",
+            "value": "proteger-privado"
+          }
+        ]
+      }
+    }
+  },
+  "sortOrder": 1
+}

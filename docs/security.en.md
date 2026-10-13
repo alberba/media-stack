@@ -7,7 +7,7 @@ What to expose, and how. An Instance has two kinds of apps:
 - **For Viewers**: Jellyfin and Seerr. They have their own user accounts and are built
   to face the internet.
 - **For the Operator**: everything else (Radarr, Sonarr, Bazarr, Prowlarr, qBittorrent,
-  Homarr, Dockge, NPM's admin UI…). They control the Instance and hold your indexer
+  Homarr, NPM's admin UI…). They control the Instance and hold your indexer
   and VPN secrets.
 
 ## Ways in
@@ -32,7 +32,7 @@ to the internet. Publish Operator apps through NPM only if you need them without
       (Settings > General > Authentication `Forms`), Bazarr (Settings > General >
       Security), qBittorrent (WebUI password), Homarr (a user, and boards not public).
 - [ ] Any Operator app published through NPM also has an **Access List** (below).
-- [ ] Dockge, File Browser, NPM's admin UI, Beszel and What's Up Docker are **never**
+- [ ] File Browser, NPM's admin UI, Beszel and What's Up Docker are **never**
       published: they reach the Docker socket or the whole disk.
 - [ ] `scripts/verify.sh` passes: qBittorrent's public IP is the VPN's. If gluetun
       drops, the apps behind it lose their network instead of leaking your IP.

@@ -1,0 +1,13 @@
+[Unit]
+Description=Requeue Tdarr videos released from hardlinks
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Adapt checkout, App data, media paths and library ID to this Instance.
+ExecStart=/usr/bin/python3 /opt/media-stack/stacks/transcode/recheck-hardlinks/recheck.py --tdarr-data-root /srv/media-stack-appdata/tdarr/server/Tdarr --media-root /srv/media/media --library-id REPLACE_LIBRARY_ID --apply
+EnvironmentFile=-/etc/media-stack/tdarr-hardlinks.env
+TimeoutStartSec=5min
+NoNewPrivileges=true
+PrivateTmp=true

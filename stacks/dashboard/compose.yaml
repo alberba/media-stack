@@ -1,5 +1,4 @@
-# Profile "dashboard": Homarr (a start page with every service) and Dockge (a web UI
-# for compose stacks).
+# Profile "dashboard": Homarr (a start page with every service).
 services:
   homarr:
     image: ghcr.io/homarr-labs/homarr:v2.1.2
@@ -18,24 +17,6 @@ services:
       # Only shows container status. Note that ":ro" stops writes to the socket file,
       # not calls to the Docker API.
       - /var/run/docker.sock:/var/run/docker.sock:ro
-    networks:
-      - media
-
-  dockge:
-    image: louislam/dockge:1.5.0
-    container_name: dockge
-    profiles: [dashboard]
-    restart: unless-stopped
-    environment:
-      DOCKGE_STACKS_DIR: ${DOCKGE_STACKS_DIR:-/opt/stacks}
-    ports:
-      - 5001:5001
-    volumes:
-      # Read-write: Dockge starts, stops and edits stacks.
-      - /var/run/docker.sock:/var/run/docker.sock
-      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/dockge:/app/data
-      # Same path inside and outside, so the stacks' relative paths still resolve.
-      - ${DOCKGE_STACKS_DIR:-/opt/stacks}:${DOCKGE_STACKS_DIR:-/opt/stacks}
     networks:
       - media
 

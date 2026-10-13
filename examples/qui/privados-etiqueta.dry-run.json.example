@@ -1,0 +1,26 @@
+{
+  "name": "Privados — etiqueta de protección",
+  "trackerPattern": "*",
+  "enabled": false,
+  "dryRun": true,
+  "notify": false,
+  "sortOrder": 0,
+  "intervalSeconds": 60,
+  "conditions": {
+    "schemaVersion": "1",
+    "tags": [
+      {
+        "enabled": true,
+        "mode": "add",
+        "tags": [
+          "proteger-privado"
+        ],
+        "condition": {
+          "field": "PRIVATE",
+          "operator": "EQUAL",
+          "value": "true"
+        }
+      }
+    ]
+  }
+}

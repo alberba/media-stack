@@ -24,6 +24,7 @@
 !/stacks/*/*/*.py
 !/stacks/wire/wire/topology.json
 !/stacks/transcode/plugins/*.js
+!/stacks/transcode/flows/*.js
 !/stacks/jellyfin/web/*.js
 # The Worker: its own compose project, run on the Worker, not on the Instance.
 !/worker/compose.yaml

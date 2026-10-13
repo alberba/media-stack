@@ -23,7 +23,7 @@ place. Stop its containers with `docker compose --profile <name> down <service>.
 | `jackett` | jackett (behind the VPN) | 9117 | [below](#jackett) |
 | `seeding` | qui, cleanuparr | 7476, 11011 | [below](#seeding) |
 | `cleanup` | maintainerr | 6246 | [below](#cleanup) |
-| `dashboard` | homarr, dockge | 7575, 5001 | [below](#dashboard) |
+| `dashboard` | homarr | 7575 | [below](#dashboard) |
 | `monitoring` | beszel, beszel-agent, wud | 8090, 3000 | [below](#monitoring) |
 | `proxy` | npm (Nginx Proxy Manager) | 80, 443, 81 | [below](#proxy) |
 | `remote` | tailscale | — | [below](#remote) |
@@ -70,6 +70,9 @@ The indexers, their logins and cookies live in `APPDATA_ROOT/jackett` (covered b
   `http://sonarr:8989`. It sees downloads at `/data/torrents`, the same path as
   qBittorrent.
 
+Las políticas de seeding para públicos y privados y los ejemplos de qui están en
+[las reglas de compresión y protección de torrents](transcode-rules.md), en español.
+
 ## cleanup
 
 Maintainerr (`http://<host>:6246`) deletes library items by rules you write (e.g. watched
@@ -85,9 +88,6 @@ by everyone and older than a year). Connect Jellyfin (`http://jellyfin:8096`), S
   `http://gluetun:8000` and the API key from `GLUETUN_CONTROL_API_KEY` in `.env`
   (`scripts/init.sh` generates it when empty). Test the integration, then select it
   in the VPN widget to show the VPN status, public IP, country and provider.
-- **Dockge** (`http://<host>:5001`): a web UI for compose stacks. `DOCKGE_STACKS_DIR` is
-  the folder it manages; point it at the folder that holds this clone to see the
-  Instance as a stack. Edits made in Dockge to the Template's files show up in `git status`.
 
 On an existing Instance, run `scripts/init.sh` to create the control server key,
 then `docker compose up -d` to apply it. This recreates gluetun and the services
@@ -95,7 +95,6 @@ sharing its network, briefly interrupting downloads and indexer access. All cont
 server routes require the key; persisted roles in `/gluetun/auth/config.toml` are
 ignored so they cannot leave routes open. Port 8000 stays internal to the media network.
 
-Only Dockge mounts the Docker socket read-write, because it starts and stops stacks.
 Homarr, Beszel and What's Up Docker mount it read-only. Note that `:ro` only protects
 the socket file: whoever can reach the socket can still call the whole Docker API. Keep
 these UIs off the internet (see [proxy](#proxy)).
