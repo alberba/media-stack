@@ -100,10 +100,90 @@ class RecheckTests(unittest.TestCase):
         self.fresh["TranscodeDecisionMaker"] = "Queued"
         self.assertEqual(self.run_recheck()["requeued"], 0)
 
+    def test_remembers_omission_after_report_is_purged(self):
+        evidence = {}
+        m.remember_omissions([self.file], evidence, self.reports)
+        self.report.unlink()
+        self.link.unlink()
+        counts = m.recheck([self.file], "library", 0.000001, self.media,
+                          Path("/data/media"), self.reports, self.api, True, evidence)
+        self.assertEqual(counts["requeued"], 1)
+
+    def test_old_evidence_cannot_authorize_a_new_file_revision(self):
+        evidence = {}
+        m.remember_omissions([self.file], evidence, self.reports)
+        self.report.unlink()
+        self.link.unlink()
+        self.file["lastTranscodeDate"] += 1
+        counts = m.recheck([self.file], "library", 0.000001, self.media,
+                          Path("/data/media"), self.reports, self.api, True, evidence)
+        self.assertEqual(counts["requeued"], 0)
+
+    def test_evidence_survives_atomic_save_and_reload(self):
+        evidence = {}
+        m.remember_omissions([self.file], evidence, self.reports)
+        path = self.root / "evidence.json"
+        m.save_evidence(path, evidence)
+        self.assertEqual(m.load_evidence(path), evidence)
+
     def test_paths_outside_the_library_are_excluded(self):
         self.link.unlink()
         self.file["_id"] = "/data/media/../torrent.mkv"
         self.assertEqual(self.run_recheck()["requeued"], 0)
+
+class FlowValidationTests(unittest.TestCase):
+    def setUp(self):
+        self.library = {"decisionMaker": {"settingsFlows": True}}
+        names = {"input": "inputFile", "links": "checkForHardlinks",
+                 "check": "processedCheck", "encoder": "runClassicTranscodePlugin",
+                 "changed": "checkFileChanged", "replace": "replaceOriginalFile",
+                 "add": "processedAdd"}
+        self.flow = {"flowPlugins": [
+            {"id": id, "pluginName": name, "fpEnabled": True,
+             "sourceRepo": "Community", "version": "1.0.0",
+             "inputsDB": {"checkType": "fileHash", "fileToAdd": "workingFile"}}
+            for id, name in names.items()], "flowEdges": [
+            {"source": a, "sourceHandle": handle, "target": b}
+            for a, handle, b in [("input", "1", "links"), ("links", "2", "check"),
+                                  ("check", "1", "encoder"), ("encoder", "1", "changed"),
+                                  ("changed", "1", "replace"), ("replace", "1", "add")]]}
+
+    def test_valid_flow(self):
+        m.validate_library(self.library, self.flow)
+
+    def test_disconnected_protections_are_rejected(self):
+        self.flow["flowEdges"] = []
+        with self.assertRaises(ValueError): m.validate_library(self.library, self.flow)
+
+    def test_skiplist_requires_content_hash_and_working_output(self):
+        for id, key, value in [("check", "checkType", "filePath"),
+                               ("add", "checkType", "fileName"),
+                               ("add", "fileToAdd", "originalFile")]:
+            with self.subTest(id=id, key=key):
+                flow = copy.deepcopy(self.flow)
+                next(p for p in flow["flowPlugins"] if p["id"] == id)["inputsDB"][key] = value
+                with self.assertRaises(ValueError): m.validate_library(self.library, flow)
+
+    def test_bypassing_each_guard_is_rejected(self):
+        for source, target in [("input", "encoder"), ("links", "encoder"),
+                               ("encoder", "replace"), ("encoder", "add")]:
+            with self.subTest(source=source, target=target):
+                flow = copy.deepcopy(self.flow)
+                next(e for e in flow["flowEdges"] if e["source"] == source)["target"] = target
+                with self.assertRaises(ValueError): m.validate_library(self.library, flow)
+
+    def test_protected_outputs_cannot_reach_encoder(self):
+        for source, handle in [("links", "1"), ("check", "2")]:
+            with self.subTest(source=source):
+                flow = copy.deepcopy(self.flow)
+                flow["flowEdges"].append({"source": source, "sourceHandle": handle, "target": "encoder"})
+                with self.assertRaises(ValueError): m.validate_library(self.library, flow)
+
+    def test_missing_registration_and_cycles_are_rejected(self):
+        self.flow["flowEdges"].pop()
+        with self.assertRaises(ValueError): m.validate_library(self.library, self.flow)
+        self.flow["flowEdges"].append({"source": "replace", "sourceHandle": "1", "target": "encoder"})
+        with self.assertRaises(ValueError): m.validate_library(self.library, self.flow)
 
 unittest.main(argv=["tdarr-hardlinks"], verbosity=2)
 PY

@@ -11,6 +11,7 @@ import os
 from pathlib import Path
 import sqlite3
 import stat
+import tempfile
 import urllib.request
 
 
@@ -75,22 +76,132 @@ def active_paths(staged):
 
 
 def validate_library(library, flow):
-    if not library.get("decisionMaker", {}).get("settingsFlows"):
-        raise ValueError("Library must use Flows with hardlink and Skiplist protection")
-    enabled = {p["pluginName"] for p in flow.get("flowPlugins", []) if p.get("fpEnabled")}
-    if not {"checkForHardlinks", "processedCheck", "processedAdd"}.issubset(enabled):
-        raise ValueError("Flow is missing hardlink or Skiplist protection")
+    """Validate every reachable path in the supported classic-encoder Flow."""
+    if not library.get("decisionMaker", {}).get("settingsFlows") or not flow:
+        raise ValueError("Library must use a protected Flow")
+    outputs = {"inputFile": ("1",), "checkFileSize": ("1", "2"),
+               "checkVideoBitrate": ("1", "2"), "checkForHardlinks": ("1", "2"),
+               "processedCheck": ("1", "2"), "checkNodeHardwareEncoder": ("1", "2"),
+               "runClassicTranscodePlugin": ("1",), "checkFileChanged": ("1", "2"),
+               "replaceOriginalFile": ("1",), "processedAdd": ("1",)}
+    nodes = {p["id"]: p for p in flow.get("flowPlugins", [])}
+    if len(nodes) != len(flow.get("flowPlugins", [])):
+        raise ValueError("Duplicate Flow node IDs")
+    starts = [id for id, p in nodes.items() if p["pluginName"] == "inputFile"]
+    if len(starts) != 1:
+        raise ValueError("Flow needs exactly one Input File")
+    edges = {}
+    for edge in flow.get("flowEdges", []):
+        key = (edge["source"], str(edge["sourceHandle"]))
+        if key in edges or edge["source"] not in nodes or edge["target"] not in nodes:
+            raise ValueError("Ambiguous or dangling Flow connection")
+        edges[key] = edge["target"]
+    reached_encoders = set()
+
+    def walk(id, evidence, ancestors):
+        if id in ancestors:
+            raise ValueError("Cyclic Flows cannot be verified")
+        node = nodes[id]
+        name = node["pluginName"]
+        if (not node.get("fpEnabled") or name not in outputs
+                or node.get("sourceRepo") != "Community" or node.get("version") != "1.0.0"):
+            raise ValueError("Unsupported or disabled step on a reachable Flow path")
+        inputs = node.get("inputsDB", {})
+        if name in {"processedCheck", "processedAdd"} and inputs.get("checkType") != "fileHash":
+            raise ValueError("Skiplist must identify content by fileHash")
+        current = set(evidence)
+        if name == "runClassicTranscodePlugin":
+            if not {"links-clear", "unprocessed"}.issubset(current):
+                raise ValueError("Encoder bypasses hardlink or Skiplist protection")
+            if "encoded" in current:
+                raise ValueError("Multiple encoders on one path cannot be verified")
+            reached_encoders.add(id)
+            current.add("encoded")
+        elif name == "replaceOriginalFile":
+            if not {"encoded", "changed"}.issubset(current):
+                raise ValueError("Replacement must follow encoding and Check File Changed")
+            current.add("replaced")
+        elif name == "processedAdd":
+            if (inputs.get("fileToAdd") != "workingFile"
+                    or not {"encoded", "changed", "replaced"}.issubset(current)):
+                raise ValueError("Register the working output only after a changed file is replaced")
+            current.add("recorded")
+        for output in outputs[name]:
+            branch = set(current)
+            if name == "checkForHardlinks":
+                if output == "2": branch.add("links-clear")
+                else: branch.discard("links-clear")
+            elif name == "processedCheck":
+                if output == "1": branch.add("unprocessed")
+                else: branch.discard("unprocessed")
+            elif name == "checkFileChanged":
+                if output == "1": branch.add("changed")
+                else: branch.difference_update({"encoded", "changed", "replaced", "recorded"})
+            target = edges.get((id, output))
+            if target:
+                walk(target, branch, ancestors | {id})
+            elif "encoded" in branch and "recorded" not in branch:
+                raise ValueError("Encoded output can terminate without Skiplist registration")
+        if any(source == id and handle not in outputs[name] for source, handle in edges):
+            raise ValueError("Unknown Flow output")
+
+    walk(starts[0], set(), set())
+    if not reached_encoders:
+        raise ValueError("Flow has no reachable protected encoder")
+
+
+def omission_identity(file):
+    """Bind cached proof to a library, scan revision and unchanged file metadata."""
+    recorded = file.get("statSync", {})
+    return {"library": file.get("DB"), "footprint": file.get("footprintId"),
+            "lastTranscodeDate": file.get("lastTranscodeDate"),
+            "size": recorded.get("size", round(file.get("file_size", 0) * 1024**2)),
+            "mtimeMs": recorded.get("mtimeMs")}
+
+
+def remember_omissions(files, evidence, reports_root):
+    for file in files:
+        identity = omission_identity(file)
+        if (evidence.get(file["_id"]) != identity
+                and omitted_for_hardlinks(file, reports_root)):
+            evidence[file["_id"]] = identity
+
+
+def load_evidence(path):
+    if not path.exists():
+        return {}
+    data = json.loads(path.read_text())
+    if data.get("version") != 1 or not isinstance(data.get("omissions"), dict):
+        raise ValueError("Unsupported hardlink omission state")
+    return data["omissions"]
+
+
+def save_evidence(path, evidence):
+    # Atomic replacement preserves the previous state if writing is interrupted.
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode="w", dir=path.parent, delete=False) as state:
+            temporary = Path(state.name)
+            json.dump({"version": 1, "omissions": evidence}, state)
+            state.flush()
+            os.fsync(state.fileno())
+        os.replace(temporary, path)
+    finally:
+        if temporary and temporary.exists():
+            temporary.unlink()
 
 
 def recheck(files, library_id, min_gib, media_root, server_root, reports_root,
-            api, apply=False):
+            api, apply=False, evidence=None):
+    evidence = evidence if evidence is not None else {}
     counts = {"examined": 0, "released": 0, "requeued": 0}
     busy = active_paths(api("StagedJSONDB", "getAll", ""))
     for file in files:
         if not previously_hardlinked(file, library_id, min_gib):
             continue
         counts["examined"] += 1
-        if (file["_id"] in busy or not omitted_for_hardlinks(file, reports_root)
+        if (file["_id"] in busy or (evidence.get(file["_id"]) != omission_identity(file)
+                    and not omitted_for_hardlinks(file, reports_root))
                 or not released_unchanged(file, media_root, server_root, min_gib)):
             continue
         counts["released"] += 1
@@ -140,9 +251,18 @@ def main():
             rows = connection.execute(
                 "SELECT json_data FROM filejsondb WHERE db=? "
                 "AND transcode_decision_maker='Not required'", (args.library_id,)).fetchall()
-        counts = recheck((json.loads(row[0]) for row in rows), args.library_id,
+        files = [json.loads(row[0]) for row in rows]
+        candidates = [file for file in files if previously_hardlinked(
+            file, args.library_id, args.min_size_gib)]
+        state_path = args.tdarr_data_root / "hardlink-omissions.json"
+        evidence = load_evidence(state_path)
+        remember_omissions(candidates, evidence, args.tdarr_data_root / "DB2/JobReports")
+        # Save proof before any queue mutation, including files still shared.
+        if args.apply:
+            save_evidence(state_path, evidence)
+        counts = recheck(files, args.library_id,
                          args.min_size_gib, args.media_root, args.server_media_root,
-                         args.tdarr_data_root / "DB2/JobReports", api, args.apply)
+                         args.tdarr_data_root / "DB2/JobReports", api, args.apply, evidence)
         print(json.dumps({"mode": "apply" if args.apply else "dry-run", **counts}))
 
 

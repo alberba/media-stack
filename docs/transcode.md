@@ -125,8 +125,11 @@ desde la Instancia, con acceso local a la Biblioteca y los Datos de las apps:
 
 - Selecciona vídeos de la biblioteca indicada en «Not required», con varios
   enlaces registrados y al menos 10 GiB, por defecto.
-- Exige que el último informe de transcodificación registre una omisión por
-  hardlinks. Si falta el informe, no vuelve a encolar el archivo automáticamente.
+- Guarda las omisiones confirmadas por el último informe en
+  `hardlink-omissions.json`, dentro de los Datos de las apps, incluso mientras
+  siguen compartidas. La evidencia queda ligada a la biblioteca, revisión,
+  tamaño y fecha del archivo, y permite revisarlo aunque Tdarr purgue el informe.
+  Si no existe ni informe ni evidencia previamente guardada, no lo encola.
 - Consulta `stat` localmente. Solo acepta archivos con un enlace, todavía por
   encima del mínimo y con tamaño y fecha de modificación iguales a los registrados.
 - Comprueba otra vez el estado y que el archivo no esté en staging antes de cambiar
@@ -135,6 +138,10 @@ desde la Instancia, con acceso local a la Biblioteca y los Datos de las apps:
 
 El script lee SQLite en modo de solo lectura y consulta metadatos del sistema de
 archivos; no lee el contenido de los vídeos ni vuelve a escanear toda la Biblioteca.
+Antes de actuar, recorre las conexiones del Flow: exige hardlinks y Skiplist por
+`fileHash` antes de cada encoder, comprobación de cambio antes del reemplazo y
+registro del resultado `workingFile` después. Rechaza conexiones que eviten estas
+protecciones, ciclos, pasos desactivados y plugins o versiones que no reconoce.
 El Worker ejecutará el Flow habitual al recibir el trabajo, incluida su protección
 de hardlinks y Skiplist. Los archivos ya comprimidos no se seleccionan para esta
 revisión. Una descarga que haya cambiado el tamaño o la fecha requiere su escaneo
@@ -169,7 +176,8 @@ journalctl -u media-stack-tdarr-hardlinks.service -n 10
 ```
 
 El timer también revisa cinco minutos después de arrancar. Un bloqueo evita
-ejecuciones simultáneas. Este mecanismo revisa archivos ya conocidos; la vigilancia
+ejecuciones simultáneas. Las escrituras de evidencia son atómicas y solo se realizan
+con `--apply`; la simulación conserva el estado. Este mecanismo revisa archivos ya conocidos; la vigilancia
 de carpetas o `Find New` siguen siendo necesarios para descubrir descargas nuevas.
 
 ### Dónde se ejecuta cada paso
