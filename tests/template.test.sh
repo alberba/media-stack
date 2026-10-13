@@ -23,7 +23,7 @@ print(" ".join(s["key"] for s in load().active({"vo"}) if s.get("profile") == "v
   [jackett]="jackett"
   [seeding]="cleanuparr qui"
   [cleanup]="maintainerr"
-  [dashboard]="dockge homarr"
+  [dashboard]="homarr"
   [monitoring]="beszel beszel-agent wud"
   [proxy]="npm"
   [remote]="tailscale"
@@ -32,8 +32,8 @@ print(" ".join(s["key"] for s in load().active({"vo"}) if s.get("profile") == "v
 )
 # Profile services that talk to trackers or indexers, and the port gluetun publishes for each.
 declare -A VPN_PORTS=([jackett]=9117 [mousehole]=5010)
-# The only service that needs to write through the Docker socket (it manages stacks).
-SOCKET_WRITERS="dockge"
+# No service needs a read-write mount of the Docker socket.
+SOCKET_WRITERS=""
 
 setup() {
   SANDBOX="$(mktemp -d)"

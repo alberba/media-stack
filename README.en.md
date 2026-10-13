@@ -59,7 +59,7 @@ Optional groups of services on top of the Core, turned on with `COMPOSE_PROFILES
 | `jackett` | Jackett, as a Torznab bridge for indexers Prowlarr lacks. |
 | `seeding` | qui (qBittorrent web UI) and cleanuparr (download cleanup). |
 | `cleanup` | Maintainerr: removes library items by rules. |
-| `dashboard` | Homarr (start page) and Dockge (compose UI). |
+| `dashboard` | Homarr (start page). |
 | `monitoring` | Beszel (metrics and alerts) and What's Up Docker (image updates). |
 | `proxy` | Nginx Proxy Manager, to publish Jellyfin and Seerr (and, carefully, some Operator apps) on the internet. See [docs/security.en.md](docs/security.en.md). |
 | `remote` | Tailscale, with the LAN as an optional subnet route. |

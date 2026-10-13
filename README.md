@@ -50,7 +50,7 @@ Toda Instancia ejecuta estos servicios:
 ## Perfiles
 
 Grupos opcionales de servicios sobre el Núcleo, que se activan con `COMPOSE_PROFILES` en
-`.env` (separados por comas). Configuración de cada uno: [docs/profiles.md](docs/profiles.md) (solo en inglés).
+`.env` (separados por comas). Configuración de cada uno: [docs/profiles.md](docs/profiles.md).
 
 | Perfil | Qué añade |
 | --- | --- |
@@ -59,7 +59,7 @@ Grupos opcionales de servicios sobre el Núcleo, que se activan con `COMPOSE_PRO
 | `jackett` | Jackett, como puente Torznab para indexers que Prowlarr no tiene. |
 | `seeding` | qui (interfaz web de qBittorrent) y cleanuparr (limpieza de descargas). |
 | `cleanup` | Maintainerr: borra elementos de la Biblioteca según reglas. |
-| `dashboard` | Homarr (página de inicio) y Dockge (interfaz para compose). |
+| `dashboard` | Homarr (página de inicio). |
 | `monitoring` | Beszel (métricas y alertas) y What's Up Docker (actualizaciones de imágenes). |
 | `proxy` | Nginx Proxy Manager, para publicar Jellyfin y Seerr (y, con cuidado, algunas apps del Operador) en internet. Ver [docs/security.md](docs/security.md). |
 | `remote` | Tailscale, con la LAN como ruta de subred opcional. |

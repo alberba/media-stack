@@ -164,16 +164,6 @@
     "secret": false,
     "wire": false
   },
-  "DOCKGE_STACKS_DIR": {
-    "scopes": {
-      "instance": {
-        "default": "/opt/stacks",
-        "required": false
-      }
-    },
-    "secret": false,
-    "wire": false
-  },
   "GLUETUN_CONTROL_API_KEY": {
     "scopes": {
       "instance": {

@@ -3,7 +3,7 @@
 # it sees the same /data/torrents, can tell which ones no longer have a hardlink.
 services:
   qui:
-    image: ghcr.io/autobrr/qui:v1.30.0
+    image: ghcr.io/autobrr/qui:v1.31.1
     container_name: qui
     profiles: [seeding]
     restart: unless-stopped

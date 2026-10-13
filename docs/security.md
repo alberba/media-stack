@@ -7,7 +7,7 @@ Qué exponer y cómo. Una Instancia tiene dos tipos de apps:
 - **Para Espectadores**: Jellyfin y Seerr. Tienen sus propias cuentas de usuario y están
   hechas para estar en internet.
 - **Para el Operador**: todo lo demás (Radarr, Sonarr, Bazarr, Prowlarr, qBittorrent,
-  Homarr, Dockge, la administración de NPM…). Controlan la Instancia y guardan los
+  Homarr, la administración de NPM…). Controlan la Instancia y guardan los
   secretos de tus indexers y de la VPN.
 
 ## Formas de entrar
@@ -33,7 +33,7 @@ hay nada abierto a internet. Publícalas por NPM solo si las necesitas sin Tails
       (Settings > General > Authentication `Forms`), Bazarr (Settings > General >
       Security), qBittorrent (contraseña de la WebUI), Homarr (un usuario y tableros no públicos).
 - [ ] Toda app del Operador publicada por NPM tiene además una **Access List** (abajo).
-- [ ] Dockge, File Browser, la administración de NPM, Beszel y What's Up Docker **nunca**
+- [ ] File Browser, la administración de NPM, Beszel y What's Up Docker **nunca**
       se publican: llegan al socket de Docker o a todo el disco.
 - [ ] `scripts/verify.sh` pasa: la IP pública de qBittorrent es la de la VPN. Si gluetun
       cae, las apps de detrás se quedan sin red en vez de filtrar tu IP.
