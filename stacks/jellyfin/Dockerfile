@@ -1,5 +1,5 @@
 # renovate: datasource=docker depName=jellyfin/jellyfin
-ARG JELLYFIN_IMAGE=jellyfin/jellyfin:12.1.20260915-010956
+ARG JELLYFIN_IMAGE=jellyfin/jellyfin:12.2.20261005-225228
 FROM ${JELLYFIN_IMAGE}
 COPY web/syncplay-web-player.js /jellyfin/jellyfin-web/media-stack-syncplay.js
 # Fail the build if a future web client changes its entry point.

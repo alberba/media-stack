@@ -1,7 +1,7 @@
 # Media server. Hardware transcoding is added by a Profile override, not here.
 services:
   jellyfin:
-    image: jellyfin/jellyfin:12.1.20260915-010956
+    image: jellyfin/jellyfin:12.2.20261005-225228
     container_name: jellyfin
     restart: unless-stopped
     user: ${PUID:?set PUID in .env}:${PGID:?set PGID in .env}
