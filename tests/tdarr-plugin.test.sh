@@ -53,7 +53,7 @@ test_keeps_the_plugin_id_existing_stacks_use() {
 test_encodes_a_large_file_without_other_links_with_nvenc() {
   run_plugin single.mkv 20480
   assert_output_contains "true|"
-  assert_output_contains "hevc_nvenc -qp 24"
+  assert_output_contains "hevc_nvenc -rc vbr -cq 18"
 }
 
 test_skips_a_large_file_that_is_still_seeding() {
@@ -77,7 +77,7 @@ test_skips_files_under_the_minimum_size() {
 test_minimum_size_and_quality_are_inputs() {
   run_plugin single.mkv 5120 video '{ minSizeGB: "4", quality: "28" }'
   assert_output_contains "true|"
-  assert_output_contains "hevc_nvenc -qp 28"
+  assert_output_contains "hevc_nvenc -rc vbr -cq 28"
 }
 
 test_skips_what_is_not_video() {
@@ -87,6 +87,18 @@ test_skips_what_is_not_video() {
 
 test_skips_a_file_it_cannot_read() {
   run_plugin missing.mkv 20480
+  assert_output_contains "false|"
+}
+
+test_zero_minimum_allows_the_flow_to_select_by_bitrate() {
+  run_plugin single.mkv 5120 video '{ minSizeGB: "0", quality: "18" }'
+  assert_output_contains "true|"
+  assert_output_contains "-preset p7 -tune hq"
+  assert_output_contains "-map 0:s?"
+}
+
+test_rejects_invalid_quality() {
+  run_plugin single.mkv 20480 video '{ quality: "invalid" }'
   assert_output_contains "false|"
 }
 

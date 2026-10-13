@@ -83,7 +83,7 @@ def validate_library(library, flow):
                "checkVideoBitrate": ("1", "2"), "checkForHardlinks": ("1", "2"),
                "processedCheck": ("1", "2"), "checkNodeHardwareEncoder": ("1", "2"),
                "runClassicTranscodePlugin": ("1",), "checkFileChanged": ("1", "2"),
-               "replaceOriginalFile": ("1",), "processedAdd": ("1",)}
+               "replaceOriginalFile": ("1",), "processedAdd": ("1",), "customFunction": ("1", "2")}
     nodes = {p["id"]: p for p in flow.get("flowPlugins", [])}
     if len(nodes) != len(flow.get("flowPlugins", [])):
         raise ValueError("Duplicate Flow node IDs")
@@ -97,6 +97,10 @@ def validate_library(library, flow):
             raise ValueError("Ambiguous or dangling Flow connection")
         edges[key] = edge["target"]
     reached_encoders = set()
+    scripts = Path(__file__).resolve().parent.parent / "flows"
+    selection_code = (scripts / "conservative-select.js").read_text()
+    output_code = (scripts / "conservative-output.js").read_text()
+    conservative = any(p.get("pluginName") == "customFunction" for p in nodes.values())
 
     def walk(id, evidence, ancestors):
         if id in ancestors:
@@ -109,17 +113,23 @@ def validate_library(library, flow):
         inputs = node.get("inputsDB", {})
         if name in {"processedCheck", "processedAdd"} and inputs.get("checkType") != "fileHash":
             raise ValueError("Skiplist must identify content by fileHash")
+        if name == "customFunction" and inputs.get("code") not in {selection_code, output_code}:
+            raise ValueError("Unverified Custom Function")
         current = set(evidence)
         if name == "runClassicTranscodePlugin":
             if not {"links-clear", "unprocessed"}.issubset(current):
                 raise ValueError("Encoder bypasses hardlink or Skiplist protection")
             if "encoded" in current:
                 raise ValueError("Multiple encoders on one path cannot be verified")
+            if conservative and "selected" not in current:
+                raise ValueError("Encoder bypasses conservative bitrate selection")
             reached_encoders.add(id)
             current.add("encoded")
         elif name == "replaceOriginalFile":
             if not {"encoded", "changed"}.issubset(current):
                 raise ValueError("Replacement must follow encoding and Check File Changed")
+            if conservative and "validated" not in current:
+                raise ValueError("Replacement bypasses conservative output validation")
             current.add("replaced")
         elif name == "processedAdd":
             if (inputs.get("fileToAdd") != "workingFile"
@@ -137,6 +147,19 @@ def validate_library(library, flow):
             elif name == "checkFileChanged":
                 if output == "1": branch.add("changed")
                 else: branch.difference_update({"encoded", "changed", "replaced", "recorded"})
+            elif name == "customFunction":
+                if inputs["code"] == selection_code:
+                    if output == "1": branch.add("selected")
+                    else: branch.discard("selected")
+                elif output == "1":
+                    if not {"encoded", "changed"}.issubset(branch):
+                        raise ValueError("Output validation must follow a changed encode")
+                    branch.add("validated")
+                else:
+                    # The canonical output function throws on failure; no output 2 exists.
+                    if (id, output) in edges:
+                        raise ValueError("Output validation has no failure bypass")
+                    continue
             target = edges.get((id, output))
             if target:
                 walk(target, branch, ancestors | {id})
@@ -228,11 +251,11 @@ def main():
     parser.add_argument("--server-media-root", type=Path, default=Path("/data/media"))
     parser.add_argument("--library-id", required=True)
     parser.add_argument("--api-url", default="http://127.0.0.1:8265")
-    parser.add_argument("--min-size-gib", type=float, default=10)
+    parser.add_argument("--min-size-gib", type=float, default=0)
     parser.add_argument("--apply", action="store_true")
     args = parser.parse_args()
-    if args.min_size_gib <= 0:
-        parser.error("--min-size-gib must be positive")
+    if args.min_size_gib < 0:
+        parser.error("--min-size-gib must be non-negative")
     api = lambda collection, mode, doc_id, obj=None: crud(
         args.api_url, collection, mode, doc_id, obj)
     # Lock in App data, shared by manual runs and scheduled invocations.

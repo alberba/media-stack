@@ -6,6 +6,12 @@ El servidor expone la interfaz en el puerto **8265** y la conexión de los Worke
 
 ## Qué se comprime
 
+Para priorizar calidad, usar la [política conservadora por bitrate](transcode-quality.md):
+Flows selecciona vídeo SDR conocido por resolución y códec, con mínimo de tamaño
+cero, y valida la salida antes del reemplazo. La alternativa orientada a ahorro
+está documentada allí y no está activada. Las siguientes condiciones describen
+el plugin clásico; no equivalen a la selección conservadora del Flow.
+
 El plugin selecciona **vídeos grandes con un único hardlink**. Esto es un indicio indirecto, no una consulta a qBittorrent. Las [reglas de compresión y protección](transcode-rules.md) explican todas las condiciones y sus excepciones. Las normas de [SeedCore](seedcore.md) y [Torrenteros](torrenteros.md) distinguen las obligaciones de descarga y publicación.
 
 La Plantilla monta en modo de solo lectura el plugin [`Tdarr_Plugin_custom_NVENC_HEVC_Compress`](../stacks/transcode/plugins/Tdarr_Plugin_custom_NVENC_HEVC_Compress.js). El servidor lo entrega a los nodos. Para cada archivo:
@@ -13,7 +19,7 @@ La Plantilla monta en modo de solo lectura el plugin [`Tdarr_Plugin_custom_NVENC
 1. Omite lo que Tdarr no identifica como vídeo.
 2. Omite tamaños inferiores a `minSizeGB`, cuyo valor predeterminado es **10 GiB**.
 3. Omite archivos cuyo contador de hardlinks no pueda leer o sea mayor que uno. Borrar la entrada del torrent no elimina necesariamente el archivo de descarga ni su enlace. Las copias independientes y los contadores incorrectos por SMB pueden eludir esta protección.
-4. Solicita recodificar el vídeo con NVENC HEVC, `quality` 24 por defecto, copiando audio y subtítulos a MKV. Tdarr gestiona el reemplazo del original.
+4. Solicita recodificar el vídeo con NVENC HEVC, `quality` CQ 18 por defecto, copiando audio y subtítulos a MKV. Tdarr gestiona el reemplazo del original.
 
 Para cambiar la implementación, editar el plugin en la Plantilla y reiniciar `tdarr`. Para cambiar tamaño mínimo o calidad, editar sus inputs en la biblioteca de Tdarr. Simular otro mínimo en un dry-run no cambia esos ajustes.
 
@@ -124,14 +130,14 @@ el Flow para ese archivo. El script
 desde la Instancia, con acceso local a la Biblioteca y los Datos de las apps:
 
 - Selecciona vídeos de la biblioteca indicada en «Not required», con varios
-  enlaces registrados y al menos 10 GiB, por defecto.
+  enlaces registrados. No aplica un mínimo de tamaño por defecto; el Flow decide
+  por bitrate cuando el Worker recibe el archivo.
 - Guarda las omisiones confirmadas por el último informe en
   `hardlink-omissions.json`, dentro de los Datos de las apps, incluso mientras
   siguen compartidas. La evidencia queda ligada a la biblioteca, revisión,
   tamaño y fecha del archivo, y permite revisarlo aunque Tdarr purgue el informe.
   Si no existe ni informe ni evidencia previamente guardada, no lo encola.
-- Consulta `stat` localmente. Solo acepta archivos con un enlace, todavía por
-  encima del mínimo y con tamaño y fecha de modificación iguales a los registrados.
+- Consulta `stat` localmente. Solo acepta archivos con un enlace, con tamaño y fecha de modificación iguales a los registrados.
 - Comprueba otra vez el estado y que el archivo no esté en staging antes de cambiar
   únicamente `TranscodeDecisionMaker` a `Queued` mediante la
   [API de Tdarr](https://tdarr.readme.io/reference/post_cruddb).
@@ -158,8 +164,7 @@ python3 stacks/transcode/recheck-hardlinks/recheck.py \
 
 `--server-media-root` vale `/data/media`; `--api-url` vale
 `http://127.0.0.1:8265`. Si la API exige autenticación, proporcionar
-`TDARR_API_KEY` mediante el entorno. Ajustar `--min-size-gib` cuando cambie el
-mínimo del Flow.
+`TDARR_API_KEY` mediante el entorno. `--min-size-gib` es un filtro opcional para bibliotecas con criterio por tamaño.
 
 Para programarlo cada hora, adaptar las rutas y el ID en el
 [servicio de ejemplo](../examples/tdarr/hardlink-recheck.service.example), copiarlo

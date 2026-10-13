@@ -19,13 +19,13 @@ Las comprobaciones se realizan en este orden. La primera que falla termina la ev
 | Supera las comprobaciones anteriores | Recodificar el vídeo a HEVC con NVENC |
 
 - `minSizeGB` vale **10** por defecto. Aunque la interfaz dice GB, el cálculo usa **GiB**: `file_size` en MiB dividido entre 1024. Un archivo exactamente igual al mínimo pasa la comprobación.
-- `quality` vale **24** por defecto y se usa como `-qp`. El preset NVENC es `p5`. Un número QP mayor pide menor calidad; el tamaño final depende del contenido.
+- `quality` vale **18** por defecto y se usa como CQ con VBR y `-b:v 0`. El preset NVENC es `p7`, tuning `hq`. Un CQ mayor pide menor calidad; el tamaño final depende del contenido. Ver la [política conservadora por bitrate](transcode-quality.md) para el Flow y su validación de salida.
 - El tamaño que evalúa el plugin procede de los metadatos de Tdarr; los hardlinks se consultan en el sistema de archivos en el momento de ejecutar el plugin.
 - El vídeo se vuelve a codificar aunque ya sea HEVC. No hay filtro por bitrate, duración, resolución, HDR, Dolby Vision ni ahorro esperado. Tampoco hay una comprobación propia de «ya comprimido».
 - Se solicita decodificación CUDA y codificación NVIDIA `hevc_nvenc`. Tener una GPU Intel/AMD en el servidor no satisface este requisito del plugin.
-- La salida es MKV; se copian audio y subtítulos. El mapeo `0:V` excluye imágenes adjuntas. El comando exige también pistas de audio y subtítulos mediante `-map 0:a -map 0:s`, sin el sufijo opcional `?`.
+- La salida es MKV; se copian audio y subtítulos. El mapeo `0:V` excluye imágenes adjuntas. El mapeo de audio, subtítulos y adjuntos es opcional (`?`); se copian también adjuntos, metadatos y capítulos.
 - `reQueueAfter` es `false`. El plugin no calcula el ahorro ni verifica por sí mismo que la salida sea más pequeña, conserve el HDR o reproduzca correctamente. Las comprobaciones y el reemplazo final dependen de Tdarr y su configuración.
-- Los inputs usan `parseFloat(...) || 10` y `parseInt(..., 10) || 24`: cero o valores no numéricos vuelven al valor predeterminado. El plugin no valida rangos ni rechaza valores negativos; usar valores positivos adecuados.
+- El mínimo acepta valores finitos no negativos; **0** permite que el Flow seleccione por bitrate. CQ acepta valores entre 1 y 51. Los inputs inválidos omiten el archivo.
 
 ## Qué significa un hardlink
 

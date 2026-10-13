@@ -148,6 +148,25 @@ class FlowValidationTests(unittest.TestCase):
                                   ("check", "1", "encoder"), ("encoder", "1", "changed"),
                                   ("changed", "1", "replace"), ("replace", "1", "add")]]}
 
+    def test_conservative_functions_are_verified_and_cannot_be_bypassed(self):
+        scripts = Path(sys.argv[1]) / "stacks/transcode/flows"
+        for id, filename in [("select", "conservative-select.js"), ("validate", "conservative-output.js")]:
+            self.flow["flowPlugins"].append({"id": id, "pluginName": "customFunction",
+                "fpEnabled": True, "sourceRepo": "Community", "version": "1.0.0",
+                "inputsDB": {"code": (scripts / filename).read_text()}})
+        next(e for e in self.flow["flowEdges"] if e["source"] == "links")["target"] = "select"
+        next(e for e in self.flow["flowEdges"] if e["source"] == "changed")["target"] = "validate"
+        self.flow["flowEdges"] += [{"source": "select", "sourceHandle": "1", "target": "check"},
+                                   {"source": "validate", "sourceHandle": "1", "target": "replace"}]
+        m.validate_library(self.library, self.flow)
+        for source, target in [("links", "check"), ("changed", "replace")]:
+            with self.subTest(source=source):
+                flow = copy.deepcopy(self.flow)
+                next(e for e in flow["flowEdges"] if e["source"] == source)["target"] = target
+                with self.assertRaises(ValueError): m.validate_library(self.library, flow)
+        self.flow["flowPlugins"][-1]["inputsDB"]["code"] = "module.exports = async args => args;"
+        with self.assertRaises(ValueError): m.validate_library(self.library, self.flow)
+
     def test_valid_flow(self):
         m.validate_library(self.library, self.flow)
 
