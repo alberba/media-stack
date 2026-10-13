@@ -24,7 +24,7 @@ print(" ".join(s["key"] for s in load().active({"vo"}) if s.get("profile") == "v
   [seeding]="cleanuparr qui"
   [cleanup]="maintainerr"
   [dashboard]="dockge homarr"
-  [monitoring]="beszel beszel-agent wud"
+  [monitoring]="beszel beszel-agent wud security-monitor"
   [proxy]="npm"
   [remote]="tailscale"
   [extras]="filebrowser issue-automator mousehole tor"
@@ -227,6 +227,13 @@ test_instance_specific_values_come_from_the_env() {
   [ "$(query 's["homarr"]["environment"]["SECRET_ENCRYPTION_KEY"]' <<< "$json")" = dummy ] || fail "homarr key does not come from .env"
   [ "$(query 's["wud"]["environment"]["WUD_AUTH_ADMIN_PASSWORD"]' <<< "$json")" = dummy ] || fail "WUD login does not come from .env"
   [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN"]' <<< "$json")" = dummy ] || fail "WUD alerts do not use TELEGRAM_BOT_TOKEN"
+}
+
+test_wud_telegram_only_notifies_major_versions() {
+  local json
+  json="$(all_profiles_json)"
+  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_THRESHOLD"]' <<< "$json")" = major-only ] || fail "WUD Telegram does not filter minor/patch updates"
+  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_ONDIGEST"]' <<< "$json")" = false ] || fail "WUD Telegram notifies image rebuilds"
 }
 
 test_tailscale_state_is_kept_in_the_app_data() {

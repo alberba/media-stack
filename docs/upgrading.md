@@ -5,6 +5,11 @@ bumps on main; maintainers test and bundle them into a release. What's Up Docker
 (the monitoring Profile) reports upstream image updates, not tested Template
 releases, and must not replace this upgrade procedure.
 
+Optional [automatic security updates](profiles.md#automatic-security-updates) install
+verified upstream fixes through an Instance-owned image override. Those pins take
+precedence over bundled image tags; review them when moving to a Template release.
+Major app changes remain manual, even if an upstream image also fixes vulnerabilities.
+
 ## Versioning and maintainer checklist
 
 Use stable SemVer tags `vMAJOR.MINOR.PATCH`:

@@ -457,6 +457,30 @@
     "secret": false,
     "wire": false
   },
+  "SECURITY_AUTO_UPDATE": {
+    "scopes": {
+      "instance": {
+        "default": "off",
+        "required": false,
+        "choices": [
+          "off",
+          "on"
+        ]
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SECURITY_SCAN_CRON": {
+    "scopes": {
+      "instance": {
+        "default": "0 6 * * *",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
   "SEERR_API_KEY": {
     "scopes": {
       "instance": {

@@ -1,6 +1,27 @@
-# Profile "monitoring": Beszel (host and container metrics, with alerts) and What's Up
-# Docker (tells you when an image has a newer version).
+# Profile "monitoring": Beszel metrics, WUD major updates and Trivy security alerts.
 services:
+  security-monitor:
+    image: media-stack-security-monitor:local
+    build: ./security-monitor
+    container_name: security-monitor
+    profiles: [monitoring]
+    restart: unless-stopped
+    mem_limit: 768m
+    cpus: 1.0
+    environment:
+      TZ: ${TZ:?set TZ in .env}
+      SECURITY_SCAN_CRON: ${SECURITY_SCAN_CRON:-0 6 * * *}
+      SECURITY_AUTO_UPDATE: ${SECURITY_AUTO_UPDATE:-off}
+      WUD_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
+      WUD_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/security-monitor:/state
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - media
+
   beszel:
     image: henrygd/beszel:0.21.0
     container_name: beszel
@@ -47,8 +68,11 @@ services:
       WUD_AUTH_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
       WUD_AUTH_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
       WUD_WATCHER_LOCAL_CRON: ${WUD_CRON:-0 5 * * *}
-      # Telegram message when an update is found. With these empty, WUD only logs
-      # that the trigger is off.
+      # Notify only major version changes, not minor/patch or image rebuilds.
+      # WUD cannot identify security fixes from image tags.
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_THRESHOLD: major-only
+      WUD_TRIGGER_TELEGRAM_TELEGRAM_ONDIGEST: "false"
+      # With these empty, WUD only logs that the trigger is off.
       WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN: ${TELEGRAM_BOT_TOKEN:-}
       WUD_TRIGGER_TELEGRAM_TELEGRAM_CHATID: ${TELEGRAM_CHAT_ID:-}
     ports:
