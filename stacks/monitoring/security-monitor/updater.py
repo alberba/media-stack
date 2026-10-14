@@ -53,6 +53,10 @@ def manual_reason(plan, now=None):
     return None
 
 
+def notify_outcome(result):
+    return result != 'manual: unclassified version change'
+
+
 class Host:
     def __init__(self, repo, state, appdata, *, timeout=300, stable=30):
         self.repo, self.state, self.appdata = Path(repo), Path(state), Path(appdata).resolve()
@@ -340,8 +344,10 @@ def run(repo, *, scan=True):
                     result = 'manual: pre-update check failed (' + type(error).__name__ + ')'
                 attempted[key] = {'service': service, 'candidate': plan.get('pinned_ref'), 'result': result}
                 atomic_json(attempted_path, attempted)
-                outcomes.append(f'{service} → {plan["remote_ref"].rsplit(":", 1)[-1]}: {result}')
-                print(outcomes[-1], flush=True)
+                outcome = f'{service} → {plan["remote_ref"].rsplit(":", 1)[-1]}: {result}'
+                print(outcome, flush=True)
+                if notify_outcome(result):
+                    outcomes.append(outcome)
                 if host.pending.exists():
                     break
             if host.pending.exists():

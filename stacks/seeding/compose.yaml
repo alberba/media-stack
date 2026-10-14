@@ -19,6 +19,12 @@ services:
     container_name: cleanuparr
     profiles: [seeding]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "--max-time", "10", "http://localhost:11011/health"]
+      interval: 30s
+      timeout: 15s
+      start_period: 30s
+      retries: 3
     environment:
       PUID: ${PUID:?set PUID in .env}
       PGID: ${PGID:?set PGID in .env}
