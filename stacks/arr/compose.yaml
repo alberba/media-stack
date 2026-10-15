@@ -3,7 +3,7 @@
 # are hardlinks, not copies.
 services:
   radarr:
-    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls320
+    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls321
     container_name: radarr
     restart: unless-stopped
     network_mode: service:gluetun
