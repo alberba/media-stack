@@ -8,6 +8,12 @@ services:
     container_name: tailscale
     profiles: [remote]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "tailscale status --json | grep -q '\"BackendState\": \"Running\"'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     hostname: ${TAILSCALE_HOSTNAME:-media-stack}
     network_mode: host
     cap_add:

@@ -78,7 +78,7 @@ services:
       - ${DATA_ROOT:?set DATA_ROOT in .env}/torrents:/data/torrents
     healthcheck:
       # Any HTTP answer counts: the API itself needs a login.
-      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:8080 || exit 1"]
+      test: ["CMD-SHELL", "curl -fso /dev/null http://localhost:8080 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

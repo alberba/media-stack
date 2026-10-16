@@ -273,15 +273,20 @@ test_download_side_goes_through_the_vpn() {
   done
 }
 
-test_every_core_service_has_a_healthcheck() {
+test_every_long_running_service_has_a_healthcheck() {
   local json service
-  json="$(compose config --format json)"
-  for service in $CORE_SERVICES; do
-    # jellyfin and gluetun ship a HEALTHCHECK in their images; the Wiring runs once and exits.
-    case "$service" in jellyfin|gluetun|wire|wire-seed) continue ;; esac
+  json="$(all_profiles_json)"
+  for service in $(python3 -c 'import json,sys; print(" ".join(json.load(sys.stdin)["services"]))' <<< "$json"); do
+    # These images ship their own checks; the Wiring runs once and exits.
+    case "$service" in jellyfin|gluetun|filebrowser|issue-automator|maintainerr|mousehole|qui|wud|wire|wire-seed) continue ;; esac
     python3 -c 'import json,sys; s=json.load(sys.stdin)["services"][sys.argv[1]]; sys.exit(0 if s.get("healthcheck",{}).get("test") else 1)' "$service" <<< "$json" \
       || fail "$service has no healthcheck"
   done
+}
+
+test_worker_has_a_healthcheck() {
+  worker_compose config --format json | python3 -c 'import json,sys; s=json.load(sys.stdin)["services"]["tdarr-node"]; sys.exit(0 if s.get("healthcheck",{}).get("test") else 1)' \
+    || fail "tdarr-node has no healthcheck"
 }
 
 test_the_wiring_runs_once_and_the_apps_wait_for_its_seed() {

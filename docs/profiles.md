@@ -133,6 +133,10 @@ these UIs off the internet (see [proxy](#proxy)).
   The service is limited to 768 MB RAM and one CPU;
   temporary scan files use its disk-backed App data folder.
   Run now with `docker compose exec security-monitor python3 /app/main.py run`.
+
+  Its healthcheck requires a running scheduler and a successful scan completed
+  within the last 48 hours. A fresh Instance stays unhealthy until its first scan;
+  run the scan manually to verify it immediately.
   For optional host-side automatic security updates, see below.
 
 ### Automatic security updates

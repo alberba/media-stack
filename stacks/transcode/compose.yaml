@@ -8,6 +8,12 @@ services:
     container_name: tdarr
     profiles: [transcode]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import json,urllib.request; r=urllib.request.urlopen('http://127.0.0.1:8266/api/v2/status',timeout=5); assert json.load(r)['status']=='good'"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     environment:
       PUID: ${PUID:?set PUID in .env}
       PGID: ${PGID:?set PGID in .env}
