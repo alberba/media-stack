@@ -21,7 +21,7 @@ services:
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/jackett:/config
     healthcheck:
       # Any HTTP answer counts: the UI redirects to its login.
-      test: ["CMD-SHELL", "curl -so /dev/null http://localhost:9117 || exit 1"]
+      test: ["CMD-SHELL", "curl -fso /dev/null http://localhost:9117 || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

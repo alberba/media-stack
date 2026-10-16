@@ -8,6 +8,12 @@ services:
     container_name: npm
     profiles: [proxy]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/bin/check-health"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     environment:
       TZ: ${TZ:?set TZ in .env}
     ports:

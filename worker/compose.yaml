@@ -13,6 +13,12 @@ services:
     image: ghcr.io/haveagitgat/tdarr_node:2.96.01
     container_name: tdarr-node
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "s6-svstat -u /run/service/tdarr_node | grep -qx true"]
+      interval: 30s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     environment:
       PUID: ${PUID:?set PUID in .env}
       PGID: ${PGID:?set PGID in .env}

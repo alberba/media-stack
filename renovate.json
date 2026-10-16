@@ -35,6 +35,16 @@
         "ghcr.io/haveagitgat/tdarr_node"
       ],
       "groupName": "Tdarr server and node"
+    },
+    {
+      "description": "Skip build/revision-only updates when major.minor.patch is unchanged; vulnerability alerts remain enabled",
+      "matchUpdateTypes": [
+        "patch"
+      ],
+      "matchJsonata": [
+        "$exists(currentVersion) and $exists(newVersion) and $exists($match(currentVersion, /^v?[0-9]+\\.[0-9]+\\.[0-9]+/).match) and $match(currentVersion, /^v?[0-9]+\\.[0-9]+\\.[0-9]+/).match = $match(newVersion, /^v?[0-9]+\\.[0-9]+\\.[0-9]+/).match"
+      ],
+      "enabled": false
     }
   ],
   "customManagers": [
@@ -60,5 +70,8 @@
         "# renovate: datasource=(?<datasource>\\S+) depName=(?<depName>\\S+)\\n\\w+ = \"(?<currentValue>[^\"]+)\""
       ]
     }
-  ]
+  ],
+  "vulnerabilityAlerts": {
+    "enabled": true
+  }
 }

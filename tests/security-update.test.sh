@@ -25,6 +25,15 @@ def plan():
 
 
 class Policy(unittest.TestCase):
+    def test_unclassified_change_stays_manual_without_notification(self):
+        p = dict(plan(), semver_diff='unknown')
+        reason = updater.manual_reason(p)
+        self.assertEqual(reason, 'unclassified version change')
+        self.assertFalse(updater.notify_outcome('manual: ' + reason))
+        self.assertTrue(updater.notify_outcome('updated'))
+        self.assertTrue(updater.notify_outcome('manual: major version: manual review'))
+        self.assertTrue(updater.notify_outcome('rollback: failed healthcheck'))
+
     def test_verified_nonmajor_security_update_is_eligible(self):
         self.assertIsNone(updater.manual_reason(plan()))
 

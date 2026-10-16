@@ -6,6 +6,12 @@ services:
     container_name: security-monitor
     profiles: [monitoring]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python3", "/app/healthcheck.py"]
+      interval: 5m
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     mem_limit: 768m
     cpus: 1.0
     environment:
@@ -27,6 +33,12 @@ services:
     container_name: beszel
     profiles: [monitoring]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/beszel", "health", "--url", "http://localhost:8090"]
+      interval: 120s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     environment:
       APP_URL: ${BESZEL_APP_URL:-http://localhost:8090}
     ports:
@@ -43,6 +55,12 @@ services:
     container_name: beszel-agent
     profiles: [monitoring]
     restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/agent", "health"]
+      interval: 120s
+      timeout: 10s
+      start_period: 60s
+      retries: 3
     # Host network, to report the host's real network traffic.
     network_mode: host
     environment:
