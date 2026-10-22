@@ -29,7 +29,7 @@ services:
       - media
 
   beszel:
-    image: henrygd/beszel:0.21.0
+    image: henrygd/beszel:0.21.1
     container_name: beszel
     profiles: [monitoring]
     restart: unless-stopped
