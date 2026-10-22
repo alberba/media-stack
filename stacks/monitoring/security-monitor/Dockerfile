@@ -1,4 +1,4 @@
-FROM aquasec/trivy:0.76.0 AS scanner
+FROM aquasec/trivy:0.76.1 AS scanner
 FROM alpine:3.24
 RUN apk add --no-cache python3 supercronic tzdata ca-certificates
 COPY --from=scanner /usr/local/bin/trivy /usr/local/bin/trivy
