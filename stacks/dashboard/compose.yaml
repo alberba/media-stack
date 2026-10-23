@@ -1,7 +1,7 @@
 # Profile "dashboard": Homarr (a start page with every service).
 services:
   homarr:
-    image: ghcr.io/homarr-labs/homarr:v2.6.0
+    image: ghcr.io/homarr-labs/homarr:v2.8.2
     container_name: homarr
     profiles: [dashboard]
     restart: unless-stopped
