@@ -4,20 +4,49 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 # Upgrade changes checked-out releases and App data; trust only this selected clone.
-git() { command git -c safe.directory="$REPO" "$@"; }
+# As root (the timer), Git runs as the clone's owner so the Operator keeps a usable clone.
+OWNER="$(stat -c %U "$REPO")"
+git() {
+  if [ "$EUID" = 0 ] && [ "$OWNER" != root ]; then
+    runuser -u "$OWNER" -- env HOME="$(getent passwd "$OWNER" | cut -d: -f6)" \
+      git -c safe.directory="$REPO" "$@"
+  else
+    command git -c safe.directory="$REPO" "$@"
+  fi
+}
 STATE="$(git rev-parse --absolute-git-dir)/media-stack-upgrade"
 API=https://api.github.com/repos/alberba/media-stack/releases
+# Releases are public: fetch over HTTPS so the timer needs no SSH key.
+TEMPLATE_GIT="${TEMPLATE_GIT:-https://github.com/alberba/media-stack.git}"
 ENV_FILE="$REPO/.env"
 export ENV_FILE
 DRY=0
+UNATTENDED=0
+AT=04:30
+PINS=""
 MODE=upgrade
 TARGET=""
 ASSUME=""
 VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-24}"
 VERIFY_INTERVAL="${VERIFY_INTERVAL:-5}"
-die() { echo "error: $*" >&2; exit 1; }
+setting() { python3 scripts/env_contract.py get --file "$ENV_FILE" --name "$1" 2>/dev/null || true; }
+# Unattended runs report to the Operator's Telegram chat when one is configured.
+notify() {
+  [ "$UNATTENDED" = 1 ] || return 0
+  local token chat
+  token="$(setting TELEGRAM_BOT_TOKEN)"
+  chat="$(setting TELEGRAM_CHAT_ID)"
+  echo "notice: $1"
+  [ -n "$token" ] && [ -n "$chat" ] || return 0
+  # The token goes through curl's config on stdin, never through argv.
+  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" |
+    curl -fsS -o /dev/null --max-time 30 -K - --data-urlencode "chat_id=$chat" \
+      --data-urlencode "text=Media Stack — $1" || echo 'warning: Telegram notification failed' >&2
+}
+die() { echo "error: $*" >&2; notify "actualización automática detenida: $*"; exit 1; }
 confirm() {
   local answer
+  [ "$UNATTENDED" = 0 ] || return 1
   printf '%s [y/N] ' "$1"
   IFS= read -r answer || return 1
   [[ "$answer" == y || "$answer" == Y ]]
@@ -38,7 +67,25 @@ verify() {
   done
   return 1
 }
+# Security pins (scripts/security-update.sh) override Template tags; a release that
+# reaches or passes a pinned version replaces the pin.
+release_pins() {
+  [ -n "$PINS" ] && [ -f stacks/monitoring/security-monitor/updater.py ] || return 0
+  bash scripts/security-update.sh release-pins
+}
+# Shares the security updater's lock: only one of them changes containers at a time.
+take_lock() {
+  local appdata dir
+  appdata="$(setting APPDATA_ROOT)"
+  dir="$appdata/security-monitor"
+  [ -n "$appdata" ] && [ -d "$dir" ] || return 0
+  exec 9>>"$dir/update.lock" || die 'Cannot open the security update lock.'
+  flock -n 9 || die 'A security update is running; try again later.'
+  [ ! -f "$dir/active-update.json" ] || die 'A security update awaits recovery: run scripts/security-update.sh first.'
+  [ ! -f "$dir/images.compose.json" ] || PINS="$dir/images.compose.json"
+}
 deploy() {
+  release_pins || return
   docker compose pull --ignore-buildable || return
   docker compose build || return
   docker compose up -d --remove-orphans || return
@@ -51,10 +98,11 @@ rollback() {
   version="$(cat "$STATE/previous-version")"
   echo "Rollback to $version ($commit). App data is not restored; see docs/backup.md."
   git checkout --detach "$commit" || return
+  if [ -n "$PINS" ] && [ -f "$STATE/previous-pins.json" ]; then cp "$STATE/previous-pins.json" "$PINS" || return; fi
   isolate_compose_env
   deploy || return
   record "$version"
-  rm -f "$STATE/previous-commit" "$STATE/previous-version" "$STATE/pending" "$STATE/attempted"
+  rm -f "$STATE/previous-commit" "$STATE/previous-version" "$STATE/previous-pins.json" "$STATE/pending" "$STATE/attempted"
   echo 'Rollback verified.'
 }
 missing_settings() {
@@ -100,8 +148,8 @@ for r in items:
   done
   [ "${#RELEASES[@]}" -gt 0 ] || die 'No stable releases published yet.'
   mapfile -t RELEASES < <(printf '%s\n' "${RELEASES[@]}" | sort -V)
-  git fetch origin --tags || die 'Could not fetch release tags.'
-  git fetch origin main:refs/remotes/origin/main || die 'Could not fetch Template main.'
+  git fetch -q "$TEMPLATE_GIT" --tags || die 'Could not fetch release tags.'
+  git fetch -q "$TEMPLATE_GIT" +main:refs/remotes/origin/main || die 'Could not fetch Template main.'
 }
 known_release() {
   local release
@@ -143,6 +191,52 @@ apply_release() {
   deploy || return
   record "$release"
 }
+# Why a release cannot be applied without the Operator, or nothing when it can.
+manual_reason() {
+  local release="$1" previous="$2" notes key
+  notes="$(git show "$release:docs/releases/$release.md" 2>/dev/null)" || { echo 'missing release notes'; return; }
+  if [ "${release%%.*}" != "${previous%%.*}" ]; then echo 'major release'; return; fi
+  if grep -qi '^Breaking changes: yes' <<< "$notes"; then echo 'breaking changes'; return; fi
+  while IFS= read -r key; do
+    grep -qE "^[[:space:]]*$key=" "$ENV_FILE" || { echo "new setting $key"; return; }
+  done < <(git show "$release:.env.example" | sed -nE 's/^([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p')
+}
+install_timer() {
+  [ "$EUID" = 0 ] || die 'Installation requires root (sudo).'
+  [ -d /run/systemd/system ] || die 'Installation requires systemd.'
+  [[ "$AT" =~ ^([01][0-9]|2[0-3]):[0-5][0-9]$ ]] || die 'Use --at HH:MM.'
+  local zone unit=/etc/systemd/system/media-stack-upgrade
+  zone="$(setting TZ)"
+  [[ "$zone" =~ ^[A-Za-z0-9_+./-]+$ ]] || die 'Set a valid TZ in .env.'
+  cat > "$unit.service" <<UNIT
+[Unit]
+Description=Unattended media-stack Template upgrades
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/bash "$REPO/scripts/upgrade.sh" --unattended
+TimeoutStartSec=4h
+UMask=0022
+UNIT
+  cat > "$unit.timer" <<UNIT
+[Unit]
+Description=Daily unattended media-stack Template upgrades
+
+[Timer]
+OnCalendar=*-*-* $AT:00 $zone
+Persistent=true
+
+[Install]
+WantedBy=timers.target
+UNIT
+  systemd-analyze verify "$unit.service" "$unit.timer" || die 'Invalid systemd units.'
+  systemctl daemon-reload
+  systemctl enable --now media-stack-upgrade.timer
+  echo "Unattended upgrades enabled daily at $AT $zone. Disable: systemctl disable --now media-stack-upgrade.timer"
+}
 isolate_compose_env() {
   local key
   while IFS= read -r key; do
@@ -154,11 +248,14 @@ main() {
   while [ "$#" -gt 0 ]; do
     case "$1" in
       --dry-run) DRY=1 ;;
+      --unattended) UNATTENDED=1 ;;
+      install) MODE=install ;;
+      --at) shift; [ "$#" -gt 0 ] || die 'Missing time.'; AT="$1" ;;
       --version) MODE=version ;;
       --list) MODE=list ;;
       --rollback) MODE=rollback ;;
       --assume-version) shift; [ "$#" -gt 0 ] || die 'Missing assumed version.'; ASSUME="$1" ;;
-      --help) echo 'Usage: scripts/upgrade.sh [vX.Y.Z] [--dry-run|--list|--version|--rollback] [--assume-version vX.Y.Z]'; return ;;
+      --help) echo 'Usage: scripts/upgrade.sh [vX.Y.Z] [--dry-run|--list|--version|--rollback|--unattended] [--assume-version vX.Y.Z] | install [--at HH:MM]'; return ;;
       v*) [ -z "$TARGET" ] || die 'Only one target allowed.'; TARGET="$1" ;;
       *) die "Unknown argument $1" ;;
     esac
@@ -166,10 +263,12 @@ main() {
   done
   [[ "$VERIFY_ATTEMPTS" =~ ^[1-9][0-9]*$ ]] || die 'VERIFY_ATTEMPTS must be positive.'
   [ "$DRY" = 0 ] || [ "$MODE" = upgrade ] || die '--dry-run is only supported for upgrades.'
+  if [ "$MODE" = install ]; then install_timer; return; fi
   if [ "$MODE" = version ] && [ -f "$STATE/installed" ] && [ -z "$ASSUME" ]; then
     cat "$STATE/installed"; return
   fi
   clean
+  if [ "$MODE" = rollback ] || { [ "$MODE" = upgrade ] && [ "$DRY" = 0 ]; }; then take_lock; fi
   isolate_compose_env
   if [ "$MODE" = rollback ]; then rollback; return; fi
   fetch_releases
@@ -197,6 +296,26 @@ main() {
     echo 'Settings added/changed:'
     git diff "$BASE" "$release" -- .env.example
   done
+  local held="" allowed=()
+  if [ "$UNATTENDED" = 1 ]; then
+    # Stop before the first release that needs the Operator; apply the ones before it.
+    previous="$BASE"
+    for release in "${PLAN[@]}"; do
+      held="$(manual_reason "$release" "$previous")"
+      if [ -n "$held" ]; then held="$release: $held"; break; fi
+      allowed+=("$release")
+      previous="$release"
+    done
+    PLAN=("${allowed[@]}")
+    if [ -n "$held" ]; then
+      echo "Held for the Operator: $held"
+      # Report each held release once, not on every daily run.
+      if [ "$DRY" = 0 ] && [ "$(cat "$STATE/held" 2>/dev/null)" != "$held" ]; then
+        mkdir -p "$STATE"; printf '%s\n' "$held" > "$STATE/held"
+        notify "$held. Requiere actualización manual: sudo scripts/upgrade.sh (docs/upgrading.md)."
+      fi
+    fi
+  fi
   if [ "$DRY" = 1 ] || [ "$MODE" = list ]; then return; fi
   [ "${#PLAN[@]}" -gt 0 ] || { record "$BASE"; echo 'Already at target.'; return; }
   [ -f "$ENV_FILE" ] || die 'No .env; run setup.sh first.'
@@ -211,18 +330,28 @@ main() {
   mkdir -p "$STATE"
   git rev-parse HEAD > "$STATE/previous-commit"
   printf '%s\n' "$BASE" > "$STATE/previous-version"
+  if [ -n "$PINS" ]; then cp "$PINS" "$STATE/previous-pins.json"; else rm -f "$STATE/previous-pins.json"; fi
   touch "$STATE/pending"
   record "$BASE"
   previous="$BASE"
   for release in "${PLAN[@]}"; do
     if ! apply_release "$release" "$previous"; then
       echo "Upgrade failed at $release. Recovery: scripts/upgrade.sh --rollback" >&2
+      if [ "$UNATTENDED" = 1 ]; then
+        if rollback; then
+          notify "falló la actualización a $release; restaurada $BASE (código e imágenes)."
+        else
+          notify "falló la actualización a $release y también la vuelta atrás. Revisa: sudo scripts/upgrade.sh --rollback"
+        fi
+        return 1
+      fi
       if confirm 'Roll back code and images now?'; then rollback || echo 'Rollback failed; recovery state retained.' >&2; fi
       return 1
     fi
     previous="$release"
   done
   rm -f "$STATE/pending" "$STATE/attempted"
-  echo "Upgrade verified: $TARGET. Previous checkout retained for --rollback."
+  echo "Upgrade verified: $previous. Previous checkout retained for --rollback."
+  notify "actualizado de $BASE a $previous y verificado.${held:+ Pendiente manual: $held.}"
 }
 main "$@"

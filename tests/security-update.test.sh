@@ -58,6 +58,21 @@ class Policy(unittest.TestCase):
         self.assertEqual(updater.stable_major('app:5.2.4_v2.0.15-ls479'), 5)
         self.assertEqual(updater.stable_major('app:6.4.4.10685-ls319'), 6)
 
+    def test_release_supersedes_only_older_or_equal_tagged_pins(self):
+        pins = {'services': {
+            'qbittorrent': {'image': 'lscr.io/linuxserver/qbittorrent:5.3.0_v2.1.2-ls484@sha256:' + 'a'*64},
+            'prowlarr': {'image': 'lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166@sha256:' + 'b'*64},
+            'bazarr': {'image': 'lscr.io/linuxserver/bazarr:v1.6.2-ls367@sha256:' + 'c'*64},
+            'jackett': {'image': 'lscr.io/linuxserver/jackett@sha256:' + 'd'*64},
+            'other': {'image': 'example/fork:9.0.0@sha256:' + 'e'*64}}}
+        template = {'qbittorrent': 'lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479',
+            'prowlarr': 'lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166',
+            'bazarr': 'lscr.io/linuxserver/bazarr:v1.6.3-ls370',
+            'jackett': 'lscr.io/linuxserver/jackett:v0.24.2788-ls48',
+            'other': 'example/app:10.0.0'}
+        # Older Template, tagless pin and another repository keep their pins.
+        self.assertEqual(updater.superseded_pins(pins, template), ['bazarr', 'prowlarr'])
+
     def test_backup_lock_prevents_update_before_any_mutation(self):
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)

@@ -15,9 +15,9 @@ import uuid
 from main import atomic_json
 
 
-def command(argv, *, cwd=None, stdin=None, timeout=1200):
+def command(argv, *, cwd=None, stdin=None, timeout=1200, env=None):
     result = subprocess.run(argv, cwd=cwd, input=stdin, text=True, capture_output=True,
-                            timeout=timeout)
+                            timeout=timeout, env=env)
     if result.returncode:
         # Compose config/HTTP errors can contain credentials. Never echo their output.
         raise RuntimeError('Command failed: ' + Path(argv[0]).name)
@@ -417,6 +417,56 @@ def install(repo):
     print(f'Security auto-updates enabled: {hour:02d}:{minute:02d} {zone}; major changes stay manual')
 
 
+def image_repo(reference):
+    name = reference.split('@', 1)[0]
+    return name.rsplit(':', 1)[0] if ':' in name.rsplit('/', 1)[-1] else name
+
+
+def version_key(reference):
+    """Numeric chunks of an image tag, or None for a reference without a tag."""
+    name = reference.split('@', 1)[0]
+    if ':' not in name.rsplit('/', 1)[-1]:
+        return None
+    return [int(part) for part in re.findall(r'\d+', name.rsplit(':', 1)[1])]
+
+
+def superseded_pins(pins, template):
+    """Pinned services whose Template image is the same version or newer."""
+    services = []
+    for service, entry in pins.get('services', {}).items():
+        pinned, current = entry.get('image', ''), template.get(service, '')
+        if not pinned or not current or image_repo(pinned) != image_repo(current):
+            continue
+        old, new = version_key(pinned), version_key(current)
+        if old is not None and new is not None and new >= old:
+            services.append(service)
+    return sorted(services)
+
+
+def release_pins(repo):
+    """After a Template release is checked out, drop the security pins it supersedes."""
+    pins_path = Path(setting(repo, 'APPDATA_ROOT')).resolve() / 'security-monitor' / 'images.compose.json'
+    if not pins_path.exists():
+        return 0
+    pins = json.loads(pins_path.read_text())
+    files = [name for name in (setting(repo, 'COMPOSE_FILE') or 'compose.yaml').split(':')
+             if name and (repo / name).resolve() != pins_path]
+    env = dict(os.environ, COMPOSE_FILE=':'.join(files))
+    model = json.loads(command(['docker', 'compose', 'config', '--format', 'json'], cwd=repo, env=env))
+    template = {name: definition['image'] for name, definition in model['services'].items()
+                if definition.get('image')}
+    removed = superseded_pins(pins, template)
+    for service in removed:
+        entry = pins['services'][service]
+        entry.pop('image')
+        if not entry:
+            del pins['services'][service]
+    if removed:
+        atomic_json(pins_path, pins)
+        print('Release supersedes security pins: ' + ', '.join(removed))
+    return 0
+
+
 def main():
     repo = Path(__file__).resolve().parents[3]
     mode = sys.argv[1] if len(sys.argv) > 1 else 'run'
@@ -427,6 +477,8 @@ def main():
         return run(repo)
     if mode == 'apply-verified':
         return run(repo, scan=False)
+    if mode == 'release-pins':
+        return release_pins(repo)
     if mode == 'disable':
         active = command(['systemctl', 'show', 'media-stack-security-updates.service', '-p', 'ActiveState', '--value']).strip()
         if active in ('active', 'activating', 'deactivating'):
@@ -437,7 +489,7 @@ def main():
         command(['docker', 'compose', 'up', '-d', '--no-deps', 'security-monitor'], cwd=repo)
         print('Auto-updates disabled; verified security notifications remain enabled')
         return 0
-    raise ValueError('Usage: security-update.sh install|run|apply-verified|disable')
+    raise ValueError('Usage: security-update.sh install|run|apply-verified|disable|release-pins')
 
 
 if __name__ == '__main__':

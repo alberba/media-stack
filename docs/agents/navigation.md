@@ -10,6 +10,7 @@ Read [CONTEXT.md](../../CONTEXT.md) for vocabulary and the relevant ADR before c
 | Initial files versus app API connections | [seed.py](../../stacks/wire/wire/seed.py) writes missing files; [steps.py](../../stacks/wire/wire/steps.py) connects apps; [extras.py](../../stacks/wire/wire/extras.py) adds optional customizations | `tests/wire.test.sh`; [ADR-0002](../adr/0002-wiring-only-seeds.md) |
 | Requests inside Jellyfin, plugins, themes | [Jellyfin customizations](../jellyfin-customizations.md#requests-inside-jellyfin-web) | [Viewer-status research](../research/viewer-request-status.md) records rationale and pending validation |
 | Release or test failures | [Testing](testing.md), [release procedure](../upgrading.md) | Shared runner: [check.sh](../../scripts/check.sh) |
+| Automatic releases and unattended upgrades | [auto-release.sh](../../scripts/auto-release.sh), [auto-release workflow](../../.github/workflows/auto-release.yml), [upgrade.sh](../../scripts/upgrade.sh), [renovate.json](../../renovate.json) | `tests/auto-release.test.sh`, `tests/upgrade.test.sh`; [ADR-0005](../adr/0005-automatic-compatible-releases.md) |
 
 `.env.example`, `worker/.env.example` and the Wiring environment allowlist in
 [compose.yaml](../../stacks/wire/compose.yaml) are generated from the environment

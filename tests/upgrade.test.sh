@@ -34,7 +34,11 @@ SCRIPT
   cat > scripts/verify.sh <<'SCRIPT'
 #!/usr/bin/env bash
 echo verify >> "$CALLS"
-[ "${VERIFY_FAIL:-0}" = 0 ]
+case "${VERIFY_FAIL:-0}" in
+  0) exit 0 ;;
+  1) exit 1 ;;
+  *) [ "$(git describe --tags --exact-match 2>/dev/null)" != "$VERIFY_FAIL" ] ;;
+esac
 SCRIPT
   cat > scripts/setup.sh <<'SCRIPT'
 #!/usr/bin/env bash
@@ -51,6 +55,7 @@ SCRIPT
   git add .; git commit -qm minor2; git tag v1.2.0
   git clone -q --bare . "$SANDBOX/remote.git"
   git remote add origin "$SANDBOX/remote.git"
+  export TEMPLATE_GIT="$SANDBOX/remote.git"
   git checkout -q --detach v1.0.0
   export CALLS="$SANDBOX/calls"
   touch "$CALLS"
@@ -181,5 +186,43 @@ test_next_upgrade_keeps_the_immediately_previous_release() {
   run_upgrade --rollback
   assert_status 0
   [ "$(git describe --tags --exact-match)" = v1.1.0 ] || fail 'rollback skipped previous upgrade'
+}
+test_unattended_applies_compatible_releases_without_prompts() {
+  OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
+  assert_status 0
+  assert_output_contains 'v1.1.0: new setting FIRST'
+  [ "$(git describe --tags --exact-match)" = v1.0.0 ] || fail 'applied a release with a new setting'
+  [ ! -s "$CALLS" ] || fail 'held upgrade ran Docker'
+  printf 'FIRST=one\nSECOND=two\n' >> .env
+  OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
+  assert_status 0
+  assert_file_contains "$CALLS" 'init v1.2.0'
+  [ "$(git describe --tags --exact-match)" = v1.2.0 ] || fail 'did not reach latest release'
+}
+test_unattended_stops_before_a_major_release() {
+  printf 'FIRST=one\nSECOND=two\n' >> .env
+  git checkout -q main
+  echo 'Breaking changes: no' > docs/releases/v2.0.0.md
+  git add .; git commit -qm major; git tag v2.0.0
+  git push -q origin main refs/tags/v2.0.0
+  git checkout -q --detach v1.0.0
+  cat > "$SANDBOX/bin/curl" <<'SCRIPT'
+#!/usr/bin/env bash
+printf '[{"tag_name":"v2.0.0","draft":false,"prerelease":false},{"tag_name":"v1.2.0","draft":false,"prerelease":false},{"tag_name":"v1.1.0","draft":false,"prerelease":false},{"tag_name":"v1.0.0","draft":false,"prerelease":false}]'
+SCRIPT
+  OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
+  assert_status 0
+  assert_output_contains 'v2.0.0: major release'
+  [ "$(git describe --tags --exact-match)" = v1.2.0 ] || fail 'crossed a major release unattended'
+  assert_file_contains .git/media-stack-upgrade/held 'v2.0.0'
+}
+test_unattended_failure_rolls_back_automatically() {
+  printf 'FIRST=one\nSECOND=two\n' >> .env
+  export VERIFY_FAIL=v1.1.0 VERIFY_ATTEMPTS=1
+  OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
+  assert_status 1
+  assert_output_contains 'Upgrade failed at v1.1.0'
+  [ "$(git describe --tags --exact-match)" = v1.0.0 ] || fail 'did not roll back'
+  [ ! -f .git/media-stack-upgrade/pending ] || fail 'rollback left recovery state'
 }
 run_tests

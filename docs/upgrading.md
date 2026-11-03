@@ -1,7 +1,9 @@
 # Releases and upgrades
 
 An Instance follows published releases of the Template. Renovate proposes image
-bumps on main; maintainers test and bundle them into a release. What's Up Docker
+bumps on main; compatible ones are merged and released automatically (see
+[Automatic releases and upgrades](#automatic-releases-and-upgrades)), and maintainers
+test and bundle the rest into a release. What's Up Docker
 (the monitoring Profile) reports upstream image updates, not tested Template
 releases, and must not replace this upgrade procedure.
 
@@ -114,3 +116,40 @@ and all App data. A failed rollback keeps recovery state so it can be retried.
 when release notes require it: [backup guide](backup.en.md). New .env settings
 remain after rollback. Restart your Worker with the release's matching Tdarr
 image after an upgrade or rollback.
+
+## Automatic releases and upgrades
+
+Compatible changes flow from Renovate to the Instance without the Operator
+([ADR-0005](adr/0005-automatic-compatible-releases.md)):
+
+1. **Renovate** merges minor, patch and digest updates once CI passes. Major
+   updates and Tdarr (which must match the Worker's node) stay as PRs.
+2. **Automatic release** (`.github/workflows/auto-release.yml`, daily at 02:00 UTC
+   or on demand) runs `scripts/auto-release.sh` on main once CI is green. It writes
+   `docs/releases/vX.Y.Z.md` from the history, commits it, tags and publishes the
+   release: minor for image bumps, settings or stacks, patch otherwise. It does
+   nothing, and the maintainer releases by hand with `scripts/release.sh`, when the
+   range since the last release has a major image update, a `BREAKING CHANGE`, a
+   Worker change or release notes already being prepared.
+3. **Unattended upgrades** on the Instance. Install the daily timer once:
+
+   ```sh
+   sudo scripts/upgrade.sh install            # daily at 04:30 in TZ
+   sudo scripts/upgrade.sh install --at 03:15
+   systemctl disable --now media-stack-upgrade.timer   # turn it off
+   ```
+
+   It runs `scripts/upgrade.sh --unattended`: the normal upgrade (backup, init,
+   pull, up, verify) without prompts. It applies releases in order and stops before
+   the first one that needs the Operator (major version, `Breaking changes: yes` or
+   a new setting missing from `.env`), reporting it once. A failed upgrade rolls
+   back code and images automatically. Results go to `TELEGRAM_BOT_TOKEN` /
+   `TELEGRAM_CHAT_ID` when set, and always to the journal
+   (`journalctl -u media-stack-upgrade`). It shares the security updater's lock,
+   and Git runs as the clone's owner. Releases are fetched over HTTPS.
+
+Security pins from [automatic security updates](profiles.md#automatic-security-updates)
+take precedence over release tags. When a release reaches or passes a pinned
+version of the same image, the upgrade removes that pin (`scripts/security-update.sh
+release-pins`); rollback restores the previous pins. Pins without a tag are kept.
+
