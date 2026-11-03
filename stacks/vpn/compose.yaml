@@ -59,6 +59,10 @@ services:
   qbittorrent:
     image: lscr.io/linuxserver/qbittorrent:5.2.4_v2.0.15-ls479
     container_name: qbittorrent
+    labels:
+      # linuxserver rebuilds (-lsNNN) count as prereleases, so WUD's major-only
+      # Telegram threshold skips them; WUD still lists them for security-monitor.
+      wud.tag.transform: '^v?(\d+)\.(\d+)\.(\d+)[^-]*-ls(\d+)$$ => $$1.$$2.$$3-$$4'
     restart: unless-stopped
     network_mode: service:gluetun
     depends_on:
@@ -87,6 +91,10 @@ services:
   prowlarr:
     image: lscr.io/linuxserver/prowlarr:2.6.5.5623-ls163
     container_name: prowlarr
+    labels:
+      # linuxserver rebuilds (-lsNNN) count as prereleases, so WUD's major-only
+      # Telegram threshold skips them; WUD still lists them for security-monitor.
+      wud.tag.transform: '^v?(\d+)\.(\d+)\.(\d+)[^-]*-ls(\d+)$$ => $$1.$$2.$$3-$$4'
     restart: unless-stopped
     network_mode: service:gluetun
     depends_on:
