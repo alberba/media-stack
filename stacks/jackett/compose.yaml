@@ -5,6 +5,10 @@ services:
   jackett:
     image: lscr.io/linuxserver/jackett:v0.24.2788-ls48
     container_name: jackett
+    labels:
+      # linuxserver rebuilds (-lsNNN) count as prereleases, so WUD's major-only
+      # Telegram threshold skips them; WUD still lists them for security-monitor.
+      wud.tag.transform: '^v?(\d+)\.(\d+)\.(\d+)[^-]*-ls(\d+)$$ => $$1.$$2.$$3-$$4'
     profiles: [jackett]
     restart: unless-stopped
     network_mode: service:gluetun
