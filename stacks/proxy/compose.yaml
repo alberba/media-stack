@@ -4,7 +4,7 @@
 # Profile. Admin UI on port 81. Guide: docs/profiles.md.
 services:
   npm:
-    image: jc21/nginx-proxy-manager:2.16.0
+    image: jc21/nginx-proxy-manager:2.17.0
     container_name: npm
     profiles: [proxy]
     restart: unless-stopped
