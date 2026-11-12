@@ -4,6 +4,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHONPATH="$REPO/stacks/monitoring/security-monitor" python3 -B - <<'PY'
 import copy
+import io
 import json
 from pathlib import Path
 import tempfile
@@ -26,6 +27,20 @@ def observation(name='app', image='sha256:a', tag='2', registry='hub.public'):
 
 
 class Monitor(unittest.TestCase):
+    def test_apps_server_discovery_ignores_other_projects(self):
+        containers = [
+            {'ImageID': 'sha256:apps', 'Image': 'app:1', 'Names': ['/seerr'],
+             'Labels': {'com.docker.compose.project': 'media-stack-apps'}},
+            {'ImageID': 'sha256:other', 'Image': 'other:1', 'Names': ['/finance'],
+             'Labels': {'com.docker.compose.project': 'finance'}},
+        ]
+        response = io.StringIO(json.dumps(containers))
+        response.status = 200
+        with patch.object(main, 'DockerConnection') as connection, \
+                patch.dict(main.os.environ, {'SECURITY_COMPOSE_PROJECT': 'media-stack-apps'}):
+            connection.return_value.getresponse.return_value = response
+            self.assertEqual(set(main.running_images()), {'sha256:apps'})
+
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.addCleanup(self.temp.cleanup)

@@ -4,6 +4,10 @@
       "instance": {
         "default": "/opt/media-stack/appdata",
         "required": true
+      },
+      "apps-server": {
+        "default": "/opt/media-stack-apps/appdata",
+        "required": true
       }
     },
     "secret": false,
@@ -137,6 +141,10 @@
   "COMPOSE_FILE": {
     "scopes": {
       "instance": {
+        "default": "",
+        "required": false
+      },
+      "apps-server": {
         "default": "",
         "required": false
       }
@@ -456,6 +464,14 @@
           "off",
           "on"
         ]
+      },
+      "apps-server": {
+        "default": "off",
+        "required": false,
+        "choices": [
+          "off",
+          "on"
+        ]
       }
     },
     "secret": false,
@@ -466,6 +482,10 @@
       "instance": {
         "default": "0 6 * * *",
         "required": false
+      },
+      "apps-server": {
+        "default": "0 6 * * *",
+        "required": false
       }
     },
     "secret": false,
@@ -474,6 +494,10 @@
   "SEERR_API_KEY": {
     "scopes": {
       "instance": {
+        "default": "",
+        "required": false
+      },
+      "apps-server": {
         "default": "",
         "required": false
       }
@@ -631,6 +655,10 @@
       "instance": {
         "default": "",
         "required": false
+      },
+      "apps-server": {
+        "default": "",
+        "required": false
       }
     },
     "secret": true,
@@ -639,6 +667,10 @@
   "TELEGRAM_CHAT_ID": {
     "scopes": {
       "instance": {
+        "default": "",
+        "required": false
+      },
+      "apps-server": {
         "default": "",
         "required": false
       }
@@ -653,6 +685,10 @@
         "required": true
       },
       "worker": {
+        "default": "Etc/UTC",
+        "required": true
+      },
+      "apps-server": {
         "default": "Etc/UTC",
         "required": true
       }
@@ -797,6 +833,10 @@
         "required_if": {
           "profile": "monitoring"
         }
+      },
+      "apps-server": {
+        "default": "",
+        "required": true
       }
     },
     "secret": true,
@@ -805,6 +845,10 @@
   "WUD_ADMIN_USER": {
     "scopes": {
       "instance": {
+        "default": "admin",
+        "required": false
+      },
+      "apps-server": {
         "default": "admin",
         "required": false
       }
@@ -816,6 +860,57 @@
     "scopes": {
       "instance": {
         "default": "0 5 * * *",
+        "required": false
+      },
+      "apps-server": {
+        "default": "0 5 * * *",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "APPS_BIND_IP": {
+    "scopes": {
+      "apps-server": {
+        "default": "127.0.0.1",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "WUD_BIND_IP": {
+    "scopes": {
+      "apps-server": {
+        "default": "127.0.0.1",
+        "required": true
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "SEERR_REMOTE_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false,
+        "pattern": "https?://[A-Za-z0-9.-]+(?::[0-9]{1,5})?/?",
+        "pattern_description": "an HTTP(S) server URL without credentials, paths or query parameters",
+        "fixture_value": "http://192.0.2.10:5055"
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "MONITOR_NAME": {
+    "scopes": {
+      "instance": {
+        "default": "Media Stack",
+        "required": false
+      },
+      "apps-server": {
+        "default": "Media Stack",
         "required": false
       }
     },

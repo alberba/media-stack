@@ -16,6 +16,7 @@ services:
     cpus: 1.0
     environment:
       TZ: ${TZ:?set TZ in .env}
+      MONITOR_NAME: ${MONITOR_NAME:-Media Stack}
       SECURITY_SCAN_CRON: ${SECURITY_SCAN_CRON:-0 6 * * *}
       SECURITY_AUTO_UPDATE: ${SECURITY_AUTO_UPDATE:-off}
       WUD_ADMIN_USER: ${WUD_ADMIN_USER:-admin}

@@ -25,6 +25,17 @@ def plan():
 
 
 class Policy(unittest.TestCase):
+    def test_apps_server_uses_its_own_environment_and_timer(self):
+        apps = updater.TEMPLATE / 'apps-server'
+        self.assertEqual(updater.project_scope(apps), 'apps-server')
+        self.assertNotEqual(updater.unit_name(apps), updater.unit_name(updater.TEMPLATE))
+        with patch.object(updater, 'command', return_value='value') as command:
+            updater.setting(apps, 'APPDATA_ROOT')
+        args = command.call_args.args[0]
+        self.assertIn(str(updater.TEMPLATE / 'scripts/env_contract.py'), args)
+        self.assertIn(str(apps / '.env'), args)
+        self.assertEqual(args[args.index('--scope') + 1], 'apps-server')
+
     def test_unclassified_change_stays_manual_without_notification(self):
         p = dict(plan(), semver_diff='unknown')
         reason = updater.manual_reason(p)
@@ -54,6 +65,8 @@ class Policy(unittest.TestCase):
         self.assertIn('stale', updater.manual_reason(p))
 
     def test_linuxserver_builds_and_digest_pins_preserve_major(self):
+        self.assertEqual(updater.stable_major('nginx:1.31.8-alpine@sha256:abc'), 1)
+        self.assertIsNone(updater.stable_major('nginx:alpine'))
         self.assertEqual(updater.stable_major('lscr.io/linuxserver/bazarr:v1.6.2-ls367@sha256:abc'), 1)
         self.assertEqual(updater.stable_major('app:5.2.4_v2.0.15-ls479'), 5)
         self.assertEqual(updater.stable_major('app:6.4.4.10685-ls319'), 6)
@@ -165,6 +178,18 @@ ENTRYPOINT ["/entrypoint.sh"]
         self.host.compose('up','-d')
         self.assertEqual(self.host.container('app')['Image'],p['candidate_id'])
         self.assertFalse(self.host.pending.exists())
+
+    def test_installer_pin_order_overrides_relay_and_is_idempotent(self):
+        override = self.project/'relay.json'
+        override.write_text(json.dumps({'services': {'app': {'image': self.images['old']}}}))
+        files = 'compose.yaml:' + str(self.pins) + ':' + str(override)
+        ordered = updater.pin_files(files, self.pins)
+        self.assertEqual(updater.pin_files(ordered, self.pins), ordered)
+        (self.project/'.env').write_text('COMPOSE_FILE=' + ordered + '\n')
+        candidate = self.candidate('good')
+        self.assertIn('actualizada', self.host.apply('app', candidate))
+        self.host.compose('up','-d')
+        self.assertEqual(self.host.container('app')['Image'], candidate['candidate_id'])
 
     def test_failed_health_restores_original_image_and_app_data(self):
         p = self.candidate('bad')

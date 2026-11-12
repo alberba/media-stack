@@ -60,3 +60,9 @@ _Avoid_: provisioning, sync, config as code
 _ES_: Conexión de las apps
 
 "User" is reserved for accounts inside the apps (a Jellyfin user, a Seerr user).
+
+**Apps server**:
+An optional Linux host running apps that reach an Instance through APIs, without mounting
+its Media library. It owns its Compose project, App data and security-update timer.
+It is distinct from a Tdarr Worker.
+_ES_: Servidor de apps

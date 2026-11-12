@@ -44,3 +44,9 @@
 !/.github/**/*.yml
 !/.github/**/*.yaml
 !/.github/**/*.md
+
+# Apps server and optional NAS relay (Operator settings remain ignored).
+!/apps-server/compose.yaml
+!/apps-server/*.example
+!/compose.seerr-remote.yaml
+!/stacks/seerr/*.template

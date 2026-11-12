@@ -1,0 +1,28 @@
+# Run from apps-server/. Each host owns its own updates and App data.
+name: media-stack-apps
+services:
+  seerr:
+    extends:
+      file: ../stacks/seerr/compose.yaml
+      service: seerr
+    ports: !override
+      - ${APPS_BIND_IP:-127.0.0.1}:5055:5055
+
+  wud:
+    extends:
+      file: ../stacks/monitoring/compose.yaml
+      service: wud
+    profiles: !reset []
+    ports: !override
+      - ${WUD_BIND_IP:-127.0.0.1}:3000:3000
+
+  security-monitor:
+    extends:
+      file: ../stacks/monitoring/compose.yaml
+      service: security-monitor
+    profiles: !reset []
+    environment:
+      SECURITY_COMPOSE_PROJECT: media-stack-apps
+
+networks:
+  media: {}

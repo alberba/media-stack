@@ -1,0 +1,19 @@
+# Optional Instance override. Keep service name/port for Wiring and existing clients.
+# Put the security updater's images.compose.json LAST in COMPOSE_FILE.
+services:
+  seerr:
+    image: nginx:1.31.8-alpine
+    environment: !override
+      SEERR_REMOTE_URL: ${SEERR_REMOTE_URL:?set SEERR_REMOTE_URL in .env}
+      NGINX_ENVSUBST_FILTER: SEERR_REMOTE_URL
+    volumes: !override
+      - ./stacks/seerr/remote.conf.template:/etc/nginx/templates/default.conf.template:ro
+    mem_limit: 32m
+    labels:
+      wud.tag.include: '^\d+\.\d+\.\d+-alpine$$'
+    healthcheck:
+      test: [CMD-SHELL, 'wget -q --spider http://127.0.0.1:5055/api/v1/status || exit 1']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
