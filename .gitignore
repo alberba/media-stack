@@ -50,3 +50,5 @@
 !/apps-server/*.example
 !/compose.seerr-remote.yaml
 !/stacks/seerr/*.template
+!/scripts/merged_updates.py
+!/docs/releases/*.deploy.json

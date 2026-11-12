@@ -92,3 +92,42 @@ Para volver al NAS después de recibir nuevas peticiones: para la app remota, ex
 su última base de datos, restaura esa copia en el NAS, revierte las direcciones de sus
 conexiones, retira el override y el pin del proxy y arranca Seerr local. Conserva la
 copia remota hasta comprobar el dominio, el login y las peticiones.
+
+## Desplegar lo aprobado por merge
+
+Para que un merge en `main` autorice también versiones major y minor, instala el seguidor:
+
+```sh
+sudo scripts/upgrade.sh install --follow-merges --apps-server
+```
+
+En el NAS se usa `sudo scripts/upgrade.sh install --follow-merges`, sin `--apps-server`.
+GitHub publica la release tras pasar CI en el commit exacto de `main`; cada host la
+comprueba cada cinco minutos. El seguidor solo consume releases con el manifiesto de
+aprobación, no ramas de PR ni versiones preliminares. La primera instalación establece
+un punto de partida y no sustituye un bootstrap más nuevo por una release antigua.
+
+El merge es autorización de versión: este camino es independiente del filtro de CVEs.
+El monitor de seguridad puede seguir trabajando en paralelo, protegido por el mismo
+bloqueo. Se respetan los overrides locales; por ejemplo, una versión de qBittorrent
+retenida por el Operator no se levanta al fusionar una PR de otra app.
+
+Solo se recrean los servicios cuyo modelo efectivo o archivos de código cambian, además
+de los consumidores de un espacio de red reemplazado. Antes de permitir escrituras se
+paran y se guardan sus datos; un fallo restaura código, imágenes, `.env`, pins y datos.
+Un reinicio del host recupera cualquier transacción pendiente. Las imágenes antiguas y
+los datos de despliegues fallidos se conservan para inspección.
+
+```sh
+systemctl list-timers media-stack-apps-merged-updates.timer
+journalctl -u media-stack-apps-merged-updates.service
+sudo scripts/upgrade.sh --follow-merges --apps-server --dry-run
+```
+
+El checkout debe estar limpio. Conserva cambios personales en overrides externos y en
+el `.env`, no editando archivos versionados. Si la release necesita valores obligatorios
+nuevos o cambia los servicios activos, se retiene hasta completar la preparación. Un
+Worker de Tdarr sigue actualizándose por separado para coincidir con su servidor.
+
+Un fallo no se reintenta sin cambios en cada ciclo. Una release posterior, o cambiar
+el `.env`/un override externo después de completar la preparación, permite reintentarlo.

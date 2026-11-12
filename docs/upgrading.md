@@ -153,3 +153,17 @@ take precedence over release tags. When a release reaches or passes a pinned
 version of the same image, the upgrade removes that pin (`scripts/security-update.sh
 release-pins`); rollback restores the previous pins. Pins without a tag are kept.
 
+
+## Seguir los merges aprobados (NAS y servidor de apps)
+
+`sudo scripts/upgrade.sh install --follow-merges` instala un seguidor de releases cada
+cinco minutos para la Instancia. Añade `--apps-server` para el servidor de apps. Este
+modo considera el merge la autorización para versiones major y minor y sustituye al
+temporizador antiguo de releases compatibles: no actives ambos sobre el mismo checkout.
+El ciclo de seguridad independiente puede seguir activo; ambos comparten bloqueo.
+
+Solo se consumen releases con manifiesto de CI en `main`. Solo se paran y recrean los
+servicios afectados en cada host. La transacción guarda datos antes de la actualización
+y restaura también esos datos si falla la salud, a diferencia del rollback de código e
+imágenes del comando de actualización antiguo. Consulta [Servidor de apps](apps-server.md)
+y [ADR-0007](adr/0007-merged-release-deployment.md).
