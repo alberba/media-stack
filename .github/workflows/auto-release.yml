@@ -1,8 +1,11 @@
 name: Automatic release
 
-# Publishes compatible changes on main as a release (scripts/auto-release.sh), so
-# Instances with unattended upgrades pick them up. Majors stay manual: docs/upgrading.md.
+# A merge is deployable after CI on the exact main commit has passed.
 on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
   schedule:
     - cron: '0 2 * * *'
   workflow_dispatch:
@@ -15,6 +18,7 @@ concurrency: auto-release
 
 jobs:
   release:
+    if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -25,11 +29,18 @@ jobs:
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
+          CI_SHA: ${{ github.event.workflow_run.head_sha }}
         run: |
           if git describe --tags --exact-match HEAD >/dev/null 2>&1; then
             echo 'main is already a release.'; echo 'ready=false' >> "$GITHUB_OUTPUT"; exit 0
           fi
           sha="$(git rev-parse HEAD)"
+          # Never publish an untested newer main when CI finished on an older merge.
+          if [ "$EVENT" = workflow_run ] && [ "$sha" != "$CI_SHA" ]; then
+            echo 'A newer main is waiting for its own CI.'
+            echo 'ready=false' >> "$GITHUB_OUTPUT"; exit 0
+          fi
           count="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$sha&status=success" --jq .total_count)"
           if [ "$count" -gt 0 ]; then
             echo 'ready=true' >> "$GITHUB_OUTPUT"

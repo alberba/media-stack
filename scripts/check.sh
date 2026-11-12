@@ -29,6 +29,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 python3 scripts/env_contract.py fixture > "$WORK/instance.env"
 python3 scripts/env_contract.py fixture --scope worker > "$WORK/worker.env"
+python3 scripts/env_contract.py fixture --scope apps-server > "$WORK/apps-server.env"
 # Use Template fixtures even when this checkout also hosts a running Instance.
 while IFS= read -r key; do unset "$key"; done < <(python3 -c \
   'import json; print("\n".join(json.load(open("env/catalog.json"))))')
@@ -43,6 +44,9 @@ compose -f compose.gpu.yaml --profile '*' config --quiet
 compose -f compose.gpu.yaml -f compose.syncplay.yaml config --quiet
 docker compose --project-directory "$REPO/worker" --env-file "$WORK/worker.env" config --quiet
 python3 scripts/env_contract.py validate --scope worker --file "$WORK/worker.env"
+docker compose --project-directory "$REPO/apps-server" --env-file "$WORK/apps-server.env" config --quiet
+python3 scripts/env_contract.py validate --scope apps-server --file "$WORK/apps-server.env"
+SEERR_REMOTE_URL=http://192.0.2.1:5055 compose -f compose.seerr-remote.yaml config --quiet
 for test in tests/*.test.sh; do
   if [ "$MODE" = ci ] && [ "$test" = tests/wire-integration.test.sh ]; then continue; fi
   echo "Running $test"

@@ -1,0 +1,20 @@
+# Copy to apps-server/.env. Keep this file and App data out of Git.
+# Private bind address (e.g. this host's Tailscale IPv4); never expose the API publicly.
+APPS_BIND_IP=@
+WUD_BIND_IP=@
+APPDATA_ROOT=@
+TZ=@
+SEERR_API_KEY=@
+
+# Discover at 05:00, compare and apply verified security corrections at 06:00.
+WUD_ADMIN_USER=@
+WUD_ADMIN_PASSWORD=@
+WUD_CRON=@
+SECURITY_SCAN_CRON=@
+# scripts/security-update.sh --apps-server install enables the host timer.
+SECURITY_AUTO_UPDATE=@
+TELEGRAM_BOT_TOKEN=@
+TELEGRAM_CHAT_ID=@
+
+# Name used in security notifications to distinguish hosts.
+MONITOR_NAME=@

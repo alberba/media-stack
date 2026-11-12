@@ -131,3 +131,5 @@ los cambios; `sudo scripts/upgrade.sh` aplica la última release y
 `sudo scripts/upgrade.sh --rollback` recupera el código y las imágenes anteriores.
 Renovate actualiza imágenes en main para los mantenedores; What's Up Docker
 (Perfil monitoring) solo avisa de actualizaciones de imágenes.
+
+- [Servidor de apps: Seerr remoto y actualizaciones de seguridad](docs/apps-server.md)

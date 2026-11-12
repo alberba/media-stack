@@ -35,6 +35,9 @@ def running_images():
         connection.close()
     images = {}
     for container in containers:
+        project = os.environ.get('SECURITY_COMPOSE_PROJECT')
+        if project and container.get('Labels', {}).get('com.docker.compose.project') != project:
+            continue
         if container.get('Labels', {}).get('com.docker.compose.service') == 'security-monitor':
             continue
         image = images.setdefault(container['ImageID'], {'tag': container['Image'], 'names': []})
@@ -182,7 +185,7 @@ def atomic_json(path, data):
 def digest(updates):
     title = ('1 actualización de seguridad verificada' if len(updates) == 1 else
              f'{len(updates)} actualizaciones de seguridad verificadas')
-    lines = [f'NAS Monitor — {title}']
+    lines = [f"{os.environ.get('MONITOR_NAME', 'Media Stack')} — {title}"]
     for update in updates:
         names = ', '.join(sorted(update['names']))
         local_tag = update['local_ref'].rsplit(':', 1)[-1]

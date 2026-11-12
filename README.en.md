@@ -128,3 +128,5 @@ Instances follow versioned Template releases. See [releases and upgrades](docs/u
 latest release and `sudo scripts/upgrade.sh --rollback` restores previous code and
 images. Renovate bumps images on main for maintainers; What's Up Docker
 (the monitoring Profile) only reports upstream image updates.
+
+- [Apps server: remote Seerr and verified security updates](docs/apps-server.md)

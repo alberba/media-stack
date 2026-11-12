@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Automatic releases tag compatible changes only and leave majors to the maintainer.
+# CI-approved merges publish minor and major image updates with deployment manifests.
 # shellcheck disable=SC1091,SC2034,SC2016
 set -uo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
@@ -47,24 +47,25 @@ test_fix_only_becomes_a_patch_release() {
   assert_status 0
   [ "$(git describe --tags --exact-match)" = v1.0.1 ] || fail 'expected v1.0.1'
 }
-test_major_image_bump_stays_manual() {
+test_major_image_bump_publishes_an_authorized_major_release() {
   bump 7.0.0.1-ls1 'chore(deps): update radarr to v7'
   run_release
   assert_status 0
-  assert_output_contains 'major update of lscr.io/linuxserver/radarr'
-  [ "$(git tag | wc -l)" = 1 ] || fail 'tagged a major update'
+  [ "$(git describe --tags --exact-match)" = v2.0.0 ] || fail 'major merge was not released'
+  assert_file_contains docs/releases/v2.0.0.md 'Breaking changes: yes'
+  assert_file_contains docs/releases/v2.0.0.deploy.json '"approved_merge": true'
 }
-test_renovate_major_branch_stays_manual() {
+test_renovate_major_merge_does_not_block_release() {
   git commit -q --allow-empty -m 'Merge pull request #1 from owner/renovate/major-something'
   run_release
-  assert_output_contains 'major image update merged'
-  [ "$(git tag | wc -l)" = 1 ] || fail 'tagged a major merge'
+  assert_status 0
+  [ "$(git describe --tags --exact-match)" = v1.0.1 ] || fail 'major branch name incorrectly blocked a reviewed merge'
 }
-test_worker_change_stays_manual() {
+test_worker_change_does_not_block_host_releases() {
   sed -i 's/2.94.02/2.95.00/' worker/compose.yaml; git commit -qam 'chore(deps): update tdarr'
   run_release
-  assert_output_contains 'Worker changed'
-  [ "$(git tag | wc -l)" = 1 ] || fail 'tagged a Worker change'
+  assert_status 0
+  assert_file_contains docs/releases/v2.0.0.md 'Update the separate Tdarr Worker'
 }
 test_new_setting_is_listed_with_a_manual_step() {
   echo 'NEW_ONE=x' >> .env.example; git commit -qam 'feat: new setting'

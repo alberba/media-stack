@@ -184,10 +184,11 @@ def rendered_examples():
     for scope, source, destination in (
         ("instance", "env/instance.example.template", ".env.example"),
         ("worker", "env/worker.example.template", "worker/.env.example"),
+        ("apps-server", "env/apps-server.example.template", "apps-server/.env.example"),
     ):
         text = (REPO / source).read_text()
         declared = set(re.findall(r"^([A-Z_][A-Z0-9_]*)=@$", text, re.M))
-        missing = set(names(scope)) - declared - ({"COMPOSE_FILE"} if scope == "instance" else set())
+        missing = set(names(scope)) - declared - ({"COMPOSE_FILE"} if scope != "worker" else set())
         if missing:
             raise ValueError(f"{source} lacks catalog settings: {', '.join(sorted(missing))}")
         for name in names(scope):
@@ -229,7 +230,7 @@ def generate(check=False):
         else:
             path.write_text(content)
     if check:
-        for scope, roots in (("instance", [REPO / "compose.yaml", REPO / "compose.gpu.yaml", *REPO.glob("stacks/*/compose.yaml")]), ("worker", [REPO / "worker/compose.yaml"])):
+        for scope, roots in (("instance", [REPO / "compose.yaml", REPO / "compose.gpu.yaml", REPO / "compose.seerr-remote.yaml", *REPO.glob("stacks/*/compose.yaml")]), ("worker", [REPO / "worker/compose.yaml"]), ("apps-server", [REPO / "apps-server/compose.yaml"])):
             available = set(names(scope))
             for path in roots:
                 source = path.read_text()
@@ -258,7 +259,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("command", choices=("resolve", "get", "validate", "overrides", "generate", "check", "fixture", "set", "comment"))
     parser.add_argument("--file", type=Path)
-    parser.add_argument("--scope", choices=("instance", "worker"), default="instance")
+    parser.add_argument("--scope", choices=("instance", "worker", "apps-server"), default="instance")
     parser.add_argument("--name")
     parser.add_argument("--file-only", action="store_true")
     parser.add_argument("--label")
@@ -278,7 +279,7 @@ def main():
                 default = CATALOG[name]["scopes"][args.scope].get("fixture_value", "dummy")
             print(f"{name}={default}")
         return 0
-    path = args.file or REPO / (".env" if args.scope == "instance" else "worker/.env")
+    path = args.file or REPO / (".env" if args.scope == "instance" else f"{args.scope}/.env")
     if not path.is_file():
         print(f"error: no {path} found", file=sys.stderr)
         return 1

@@ -1,4 +1,5 @@
 """Host-side Compose updates with persistent image pins and App data rollback."""
+import argparse
 import copy
 import datetime
 import fcntl
@@ -15,6 +16,22 @@ import uuid
 from main import atomic_json
 
 
+TEMPLATE = Path(__file__).resolve().parents[3]
+
+
+def project_scope(repo):
+    return "apps-server" if Path(repo).resolve() == TEMPLATE / "apps-server" else "instance"
+
+
+def unit_name(repo):
+    return "media-stack-apps-security-updates" if project_scope(repo) == "apps-server" else "media-stack-security-updates"
+
+
+def pin_files(compose_files, pins):
+    # Reinstallation repairs precedence without duplicating the persistent pin file.
+    return ':'.join([p for p in compose_files.split(':') if p != str(pins)] + [str(pins)])
+
+
 def command(argv, *, cwd=None, stdin=None, timeout=1200, env=None):
     result = subprocess.run(argv, cwd=cwd, input=stdin, text=True, capture_output=True,
                             timeout=timeout, env=env)
@@ -26,7 +43,7 @@ def command(argv, *, cwd=None, stdin=None, timeout=1200, env=None):
 
 def stable_major(reference):
     tag = reference.split('@', 1)[0].rsplit(':', 1)[-1]
-    match = re.fullmatch(r'v?(\d+)\.\d+\.\d+(?:\.\d+)?(?:-ls\d+|_v[\d.]+(?:-ls\d+)?)?', tag)
+    match = re.fullmatch(r'v?(\d+)\.\d+\.\d+(?:\.\d+)?(?:-ls\d+|_v[\d.]+(?:-ls\d+)?|-alpine)?', tag)
     return int(match[1]) if match else None
 
 
@@ -268,13 +285,13 @@ class Host:
 
 
 def setting(repo, name):
-    return command(['python3', str(repo / 'scripts/env_contract.py'), 'get',
-                    '--file', str(repo / '.env'), '--name', name], cwd=repo)
+    return command(['python3', str(TEMPLATE / 'scripts/env_contract.py'), 'get',
+                    '--scope', project_scope(repo), '--file', str(repo / '.env'), '--name', name], cwd=repo)
 
 
 def set_setting(repo, name, value):
-    command(['python3', str(repo / 'scripts/env_contract.py'), 'set',
-             '--file', str(repo / '.env'), '--name', name], cwd=repo, stdin=value)
+    command(['python3', str(TEMPLATE / 'scripts/env_contract.py'), 'set',
+             '--scope', project_scope(repo), '--file', str(repo / '.env'), '--name', name], cwd=repo, stdin=value)
 
 
 def notify(message):
@@ -295,6 +312,7 @@ def run(repo, *, scan=True):
     if setting(repo, 'SECURITY_AUTO_UPDATE') != 'on':
         print('Security auto-updates are off')
         return 0
+    label = setting(repo, 'MONITOR_NAME') or 'Media Stack'
     appdata = Path(setting(repo, 'APPDATA_ROOT')).resolve()
     state = appdata / 'security-monitor'
     host = Host(repo, state, appdata)
@@ -308,7 +326,7 @@ def run(repo, *, scan=True):
                 host.pending.unlink()
             else:
                 host.rollback(transaction)
-                notify('NAS Monitor — recuperación completada: ' + transaction['service'])
+                notify(label + ' — recuperación completada: ' + transaction['service'])
         if scan:
             # A failed comparison batch must not trigger automatic mutations.
             host.compose('exec', '-T', 'security-monitor', 'python3', '/app/main.py', 'run')
@@ -355,7 +373,7 @@ def run(repo, *, scan=True):
         if outcomes:
             outbox = state / 'update-notifications.json'
             queued = json.loads(outbox.read_text()) if outbox.exists() else []
-            queued.append('NAS Monitor — autoactualización de seguridad\n\n' + '\n'.join(outcomes))
+            queued.append(label + ' — autoactualización de seguridad\n\n' + '\n'.join(outcomes))
             atomic_json(outbox, queued)
             flush_notifications(state)
         return 1 if host.pending.exists() or any(': rollback:' in line or ': ERROR:' in line for line in outcomes) else 0
@@ -366,8 +384,8 @@ def install(repo):
         raise RuntimeError('Installation requires root')
     if not Path('/run/systemd/system').exists():
         raise RuntimeError('Host installation requires systemd')
-    catalog = json.loads((repo / 'env/catalog.json').read_text())
-    cron_value = setting(repo, 'SECURITY_SCAN_CRON') or catalog['SECURITY_SCAN_CRON']['scopes']['instance']['default']
+    catalog = json.loads((TEMPLATE / 'env/catalog.json').read_text())
+    cron_value = setting(repo, 'SECURITY_SCAN_CRON') or catalog['SECURITY_SCAN_CRON']['scopes'][project_scope(repo)]['default']
     cron = cron_value.split()
     if len(cron) != 5 or cron[2:] != ['*', '*', '*'] or not cron[0].isdigit() or not cron[1].isdigit():
         raise RuntimeError('Auto-update timer requires a daily SECURITY_SCAN_CRON')
@@ -387,29 +405,28 @@ def install(repo):
         compose_files = 'compose.yaml'
         if (repo / 'compose.override.yaml').exists():
             compose_files += ':compose.override.yaml'
-    paths = compose_files.split(':')
-    if str(pins) not in paths:
-        paths.append(str(pins))
-    set_setting(repo, 'COMPOSE_FILE', ':'.join(paths))
+    set_setting(repo, 'COMPOSE_FILE', pin_files(compose_files, pins))
     command(['docker', 'compose', 'config', '--quiet'], cwd=repo)
-    path = str(repo / 'scripts/security-update.sh').replace('%', '%%').replace('\\', '\\\\').replace('"', '\\"')
+    path = str(TEMPLATE / 'scripts/security-update.sh').replace('%', '%%').replace('\\', '\\\\').replace('"', '\\"')
+    role = ' --apps-server' if project_scope(repo) == 'apps-server' else ''
+    unit = unit_name(repo)
     service = '[Unit]\nDescription=Verified media-stack security updates\nAfter=docker.service network-online.target\nRequires=docker.service\nStartLimitIntervalSec=1h\nStartLimitBurst=3\n\n[Service]\nType=oneshot\n'
-    service += f'ExecStart=/usr/bin/bash "{path}" run\nTimeoutStartSec=4h\nUMask=0077\nRestart=on-failure\nRestartSec=5min\n\n[Install]\nWantedBy=multi-user.target\n'
+    service += f'ExecStart=/usr/bin/bash "{path}"{role} run\nTimeoutStartSec=4h\nUMask=0077\nRestart=on-failure\nRestartSec=5min\n\n[Install]\nWantedBy=multi-user.target\n'
     timer = '[Unit]\nDescription=Daily verified media-stack security updates\n\n[Timer]\n'
     timer += f'OnCalendar=*-*-* {hour:02d}:{minute:02d}:00 {zone}\nPersistent=true\n\n[Install]\nWantedBy=timers.target\n'
     system = Path('/etc/systemd/system')
-    (system / 'media-stack-security-updates.service').write_text(service)
-    (system / 'media-stack-security-updates.timer').write_text(timer)
-    command(['systemd-analyze', 'verify', str(system / 'media-stack-security-updates.service'),
-             str(system / 'media-stack-security-updates.timer')])
+    (system / (unit + '.service')).write_text(service)
+    (system / (unit + '.timer')).write_text(timer)
+    command(['systemd-analyze', 'verify', str(system / (unit + '.service')),
+             str(system / (unit + '.timer'))])
     command(['systemctl', 'daemon-reload'])
     previous = setting(repo, 'SECURITY_AUTO_UPDATE')
     try:
         # One host cycle owns scanning and updating. Internal scanner cron stays idle.
         set_setting(repo, 'SECURITY_AUTO_UPDATE', 'on')
         command(['docker', 'compose', 'up', '-d', '--no-deps', 'security-monitor'], cwd=repo)
-        command(['systemctl', 'enable', 'media-stack-security-updates.service'])
-        command(['systemctl', 'enable', '--now', 'media-stack-security-updates.timer'])
+        command(['systemctl', 'enable', unit + '.service'])
+        command(['systemctl', 'enable', '--now', unit + '.timer'])
     except Exception:
         set_setting(repo, 'SECURITY_AUTO_UPDATE', previous)
         command(['docker', 'compose', 'up', '-d', '--no-deps', 'security-monitor'], cwd=repo)
@@ -468,8 +485,13 @@ def release_pins(repo):
 
 
 def main():
-    repo = Path(__file__).resolve().parents[3]
-    mode = sys.argv[1] if len(sys.argv) > 1 else 'run'
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--apps-server', action='store_true')
+    parser.add_argument('mode', nargs='?', default='run', choices=['install', 'run', 'apply-verified', 'release-pins', 'disable'])
+    args = parser.parse_args()
+    repo = TEMPLATE / 'apps-server' if args.apps_server else TEMPLATE
+    unit = unit_name(repo)
+    mode = args.mode
     if mode == 'install':
         install(repo)
         return 0
@@ -480,11 +502,11 @@ def main():
     if mode == 'release-pins':
         return release_pins(repo)
     if mode == 'disable':
-        active = command(['systemctl', 'show', 'media-stack-security-updates.service', '-p', 'ActiveState', '--value']).strip()
+        active = command(['systemctl', 'show', unit + '.service', '-p', 'ActiveState', '--value']).strip()
         if active in ('active', 'activating', 'deactivating'):
             raise RuntimeError('Wait for the current update before disabling its timer')
-        command(['systemctl', 'disable', '--now', 'media-stack-security-updates.timer'])
-        command(['systemctl', 'disable', 'media-stack-security-updates.service'])
+        command(['systemctl', 'disable', '--now', unit + '.timer'])
+        command(['systemctl', 'disable', unit + '.service'])
         set_setting(repo, 'SECURITY_AUTO_UPDATE', 'off')
         command(['docker', 'compose', 'up', '-d', '--no-deps', 'security-monitor'], cwd=repo)
         print('Auto-updates disabled; verified security notifications remain enabled')

@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Upgrade an Instance through published stable Template releases.
 set -euo pipefail
+for option in "$@"; do
+  if [ "$option" = --follow-merges ]; then
+    exec python3 "$(dirname "$0")/merged_updates.py" "$@"
+  fi
+done
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$REPO"
 # Upgrade changes checked-out releases and App data; trust only this selected clone.

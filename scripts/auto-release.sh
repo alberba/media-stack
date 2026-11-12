@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Prepare the next automatic Template release on main: notes, commit and annotated tag.
-# Only compatible changes qualify. Major image updates, breaking changes and Worker
-# changes stay manual (scripts/release.sh), because they need the Operator.
+# A reviewed merge on main authorizes image major/minor updates after CI.
+# Worker coordination is recorded in notes; hosts still validate their own configuration.
 # Writes version=vX.Y.Z to $GITHUB_OUTPUT when a release was prepared.
 # shellcheck disable=SC2016 # Backticks in notes and the inline Python are literal.
 set -euo pipefail
@@ -17,9 +17,10 @@ LATEST="$(git tag --list 'v[0-9]*' --sort=-version:refname | grep -E '^v[0-9]+\.
 git merge-base --is-ancestor "$LATEST" HEAD || die "$LATEST is outside main."
 [ -n "$(git rev-list "$LATEST..HEAD")" ] || { echo "No changes since $LATEST."; exit 0; }
 
-git log --format=%B "$LATEST..HEAD" | grep -q 'renovate/major-' && manual 'major image update merged'
-git log --format=%B "$LATEST..HEAD" | grep -qE '^BREAKING[ -]CHANGE' && manual 'breaking change'
-git diff --quiet "$LATEST" HEAD -- worker/ || manual 'the Worker changed and must be updated with the Instance'
+CODE_MAJOR=0
+if git log --format=%B "$LATEST..HEAD" | grep -qE '^BREAKING[ -]CHANGE'; then CODE_MAJOR=1; fi
+WORKER_CHANGED=0
+if ! git diff --quiet "$LATEST" HEAD -- worker/; then WORKER_CHANGED=1; fi
 [ -z "$(git diff --name-only --diff-filter=A "$LATEST" HEAD -- docs/releases/)" ] ||
   manual 'release notes are already being prepared'
 
@@ -38,11 +39,12 @@ for repo in sorted(new):
     if repo in old and old[repo] != new[repo]:
         print(repo, old[repo], new[repo])
 ')"
+IMAGE_MAJOR=0
 while read -r repo old new; do
   [ -n "$repo" ] || continue
   major_old="$(grep -oE '^v?[0-9]+' <<< "$old" | tr -d v || true)"
   major_new="$(grep -oE '^v?[0-9]+' <<< "$new" | tr -d v || true)"
-  [ "$major_old" = "$major_new" ] || manual "major update of $repo ($old -> $new)"
+  if [ "$major_old" != "$major_new" ]; then IMAGE_MAJOR=1; fi
 done <<< "$IMAGES"
 
 SETTINGS="$(git diff -U0 "$LATEST" HEAD -- .env.example | sed -nE 's/^\+([A-Za-z_][A-Za-z0-9_]*)=.*/\1/p' |
@@ -51,7 +53,9 @@ STACKS="$(git diff --name-only --diff-filter=A "$LATEST" HEAD -- 'stacks/*/compo
 FIXES="$(git log --no-merges --format=%s "$LATEST..HEAD" | grep -vE '^chore\((deps|release)\)' || true)"
 
 IFS=. read -r major minor patch <<< "${LATEST#v}"
-if [ -n "$IMAGES" ] || [ -n "$SETTINGS" ] || [ -n "$STACKS" ]; then
+if [ "$IMAGE_MAJOR" = 1 ] || [ "$CODE_MAJOR" = 1 ] || [ "$WORKER_CHANGED" = 1 ]; then
+  VERSION="v$((major + 1)).0.0"
+elif [ -n "$IMAGES" ] || [ -n "$SETTINGS" ] || [ -n "$STACKS" ]; then
   VERSION="v$major.$((minor + 1)).0"
 else
   VERSION="v$major.$minor.$((patch + 1))"
@@ -64,7 +68,7 @@ list() {
 }
 {
   echo "# $VERSION"
-  echo 'Breaking changes: no'
+  if [ "$IMAGE_MAJOR" = 1 ] || [ "$CODE_MAJOR" = 1 ] || [ "$WORKER_CHANGED" = 1 ]; then echo 'Breaking changes: yes'; else echo 'Breaking changes: no'; fi
   echo
   echo '## Images bumped'
   if [ -n "$IMAGES" ]; then
@@ -83,13 +87,24 @@ list() {
   list "$FIXES" ''
   echo
   echo '## Manual steps'
+  if [ "$WORKER_CHANGED" = 1 ]; then echo '- Update the separate Tdarr Worker to match the Instance; host deployment does not manage Workers.'; fi
   if [ -n "$SETTINGS" ]; then
     echo '- Fill the new settings: `sudo scripts/upgrade.sh` asks for them. Unattended upgrades wait for this.'
   else
-    echo '- None. Automatic release: compatible changes only.'
+    echo '- Merged changes authorized for host deployment after CI.'
   fi
 } > "$NOTES"
-git add "$NOTES"
+# This manifest is consumed only by hosts explicitly following approved merges.
+SOURCE_COMMIT="$(git rev-parse HEAD)"
+python3 - "$VERSION" "$SOURCE_COMMIT" <<'PYMANIFEST'
+import json,sys
+from pathlib import Path
+version,source=sys.argv[1:]
+Path(f'docs/releases/{version}.deploy.json').write_text(json.dumps({
+ 'schema':1,'approved_merge':True,'source_commit':source,
+ 'roles':['instance','apps-server']},indent=2)+'\n')
+PYMANIFEST
+git add "$NOTES" "docs/releases/$VERSION.deploy.json"
 git commit -q -m "chore(release): $VERSION"
 git tag -a "$VERSION" -F "$NOTES"
 echo "Prepared $VERSION from $LATEST."
