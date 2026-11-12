@@ -420,7 +420,7 @@ UMask=0077
 Description=Check CI-approved media-stack releases every five minutes ({self.scope})
 [Timer]
 OnBootSec=3min
-OnUnitActiveSec=5min
+OnUnitInactiveSec=5min
 Persistent=true
 [Install]
 WantedBy=timers.target
