@@ -88,6 +88,9 @@ scripts/setup.sh && docker compose up -d && scripts/verify.sh
 4. [Copia de seguridad y restauración](docs/backup.md). Solo en inglés:
    [Perfiles](docs/profiles.md), [transcodificación](docs/transcode.md) y
    [personalizaciones de Jellyfin](docs/jellyfin-customizations.md) (opcional).
+5. [Reproducción directa remota](docs/jellyfin-direct-play.md): diagnóstico de cortes,
+   diferencias entre CUBIC y BBR, prueba reversible y
+   [caso documentado](docs/research/2026-11-15-jellyfin-direct-play-bbr.md).
 
 ## Estructura
 

@@ -87,6 +87,9 @@ scripts/setup.sh && docker compose up -d && scripts/verify.sh
 3. [Security checklist](docs/security.en.md): what to expose, Access Lists, Tailscale.
 4. [Profiles](docs/profiles.md), [backup and restore](docs/backup.en.md),
    [transcoding](docs/transcode.md), [Jellyfin customizations](docs/jellyfin-customizations.md) (optional).
+5. [Remote direct playback](docs/jellyfin-direct-play.md) (Spanish): buffering diagnosis,
+   CUBIC versus BBR, a reversible test, and a
+   [documented case](docs/research/2026-11-15-jellyfin-direct-play-bbr.md).
 
 ## Layout
 
