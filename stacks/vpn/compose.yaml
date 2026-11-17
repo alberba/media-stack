@@ -89,7 +89,7 @@ services:
       start_period: 30s
 
   prowlarr:
-    image: lscr.io/linuxserver/prowlarr:2.7.0.5723-ls166
+    image: lscr.io/linuxserver/prowlarr:3.0.2.5780-ls169
     container_name: prowlarr
     labels:
       # linuxserver rebuilds (-lsNNN) count as prereleases, so WUD's major-only
