@@ -1,0 +1,9 @@
+{
+  "schema": 1,
+  "approved_merge": true,
+  "source_commit": "1338dc0967888f985279da556967c6cf9dccd316",
+  "roles": [
+    "instance",
+    "apps-server"
+  ]
+}
