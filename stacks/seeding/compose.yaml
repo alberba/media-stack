@@ -15,7 +15,7 @@ services:
       - media
 
   cleanuparr:
-    image: ghcr.io/cleanuparr/cleanuparr:2.11.1
+    image: ghcr.io/cleanuparr/cleanuparr:2.11.2
     container_name: cleanuparr
     profiles: [seeding]
     restart: unless-stopped
