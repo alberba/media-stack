@@ -3,7 +3,7 @@
 # are hardlinks, not copies.
 services:
   radarr:
-    image: lscr.io/linuxserver/radarr:6.4.4.10685-ls320
+    image: lscr.io/linuxserver/radarr:7.0.3.10918-ls328
     container_name: radarr
     labels:
       # linuxserver rebuilds (-lsNNN) read as prereleases after this tag
