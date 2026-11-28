@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Tests for stacks/backup/media-backup.sh. restic, curl and supercronic are fakes on
-# PATH; sqlite3 is the real one, so the database copies are real online backups.
+# PATH; sqlite3 is the real one, so the database copies are real online backups. The
+# signature of every event published to the hub is checked against an independent HMAC
+# oracle written in Python.
 # Usage: tests/backup.test.sh
 set -uo pipefail
 
@@ -15,6 +17,9 @@ setup() {
   export CRONTAB_FILE="$SANDBOX/crontab"
   export RESTIC_REPOSITORY="rclone:gdrive:media-stack" RESTIC_PASSWORD="correct horse"
   export TELEGRAM_BOT_TOKEN="123:abc" TELEGRAM_CHAT_ID="42"
+  export NOTIFY_INGEST_URL="http://hub.test/api/notifications/ingest"
+  export NOTIFY_INGEST_SECRET="ingest-test-secret-0123456789abcdef" NOTIFY_INGEST_HOST_ID="nas-home"
+  export INGEST_RETRY_DELAYS="0 0 0" FAKE_INGEST_CODES="202"
   export BACKUP_EXCLUDE="" BACKUP_SCHEDULE=""
   export FAKE_LOG="$SANDBOX/calls.log" CAPTURE="$SANDBOX/capture"
   export FAKE_CAT_CONFIG_STATUS=0 FAKE_BACKUP_STATUS=0 FAKE_FORGET_STATUS=0
@@ -38,9 +43,41 @@ case "$1" in
 esac
 exit 0
 EOF
+  # curl: logs every call. A call that reads a config from stdin (-K) is the direct
+  # Telegram notice; one that sends --data-binary is a hub ingest request. Each is saved
+  # as $CAPTURE/telegram-N.* or $CAPTURE/ingest-N.*; the HTTP code of ingest request N is
+  # the Nth word of FAKE_INGEST_CODES (the last one repeats), and 000 is a network failure.
   cat > "$SANDBOX/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "curl ${*//$'\n'/ }" >> "$FAKE_LOG"
+args=("$@"); kind=other; headers=(); want_code=0
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -K) kind=telegram ;;
+    --data-binary) kind=ingest ;;
+    -H) headers+=("${args[i+1]}") ;;
+    -w) want_code=1 ;;
+  esac
+done
+next() { local n=1; while [ -e "$CAPTURE/$1-$n.args" ]; do n=$((n + 1)); done; echo "$n"; }
+case "$kind" in
+  telegram)
+    n="$(next telegram)"
+    printf '%s\n' "$@" > "$CAPTURE/telegram-$n.args"
+    cat > "$CAPTURE/telegram-$n.stdin"
+    exit "${FAKE_TELEGRAM_STATUS:-0}" ;;
+  ingest)
+    n="$(next ingest)"
+    printf '%s\n' "$@" > "$CAPTURE/ingest-$n.args"
+    printf '%s\n' "${headers[@]}" > "$CAPTURE/ingest-$n.headers"
+    cat > "$CAPTURE/ingest-$n.body"
+    read -ra codes <<< "${FAKE_INGEST_CODES:-202}"
+    code="${codes[n-1]:-${codes[${#codes[@]}-1]}}"
+    [ "$want_code" = 1 ] && printf '%s' "$code"
+    [ "$code" = 000 ] && exit 7
+    exit 0 ;;
+esac
+exit 0
 EOF
   cat > "$SANDBOX/bin/supercronic" <<'EOF'
 #!/usr/bin/env bash
@@ -73,6 +110,33 @@ assert_not_excluded() {
   [[ "$(restic_call backup)" != *"$1"* ]] || fail "$1 is excluded: $(restic_call backup)"
 }
 restic_call() { grep "^restic $1" "$FAKE_LOG" 2>/dev/null; }
+
+# --- the hub ingest and the direct Telegram notice --------------------------
+count_captured() { find "$CAPTURE" -maxdepth 1 -name "$1-*.args" | wc -l; }
+ingest_count() { count_captured ingest; }
+telegram_count() { count_captured telegram; }
+assert_ingest_count() { [ "$(ingest_count)" = "$1" ] || fail "expected $1 ingest requests, got $(ingest_count)"; }
+assert_telegram_count() { [ "$(telegram_count)" = "$1" ] || fail "expected $1 direct notices, got $(telegram_count)"; }
+header_value() { sed -n "s/^$2: //p" "$CAPTURE/ingest-$1.headers"; }
+event_id_of() { jq -r .eventId "$CAPTURE/ingest-$1.body"; }
+# The independent oracle: HMAC-SHA256 over "<timestamp>.<body>" computed by Python.
+oracle_signature() {
+  python3 -I - "$CAPTURE/ingest-$1.body" "$(header_value "$1" X-Ingest-Timestamp)" <<'PY'
+import hashlib, hmac, os, sys
+body = open(sys.argv[1], "rb").read()
+key = os.environ["NOTIFY_INGEST_SECRET"].encode()
+print(hmac.new(key, sys.argv[2].encode() + b"." + body, hashlib.sha256).hexdigest())
+PY
+}
+assert_signed_request() {
+  local n="$1" timestamp signature
+  timestamp="$(header_value "$n" X-Ingest-Timestamp)"
+  signature="$(header_value "$n" X-Ingest-Signature)"
+  [[ "$timestamp" =~ ^[0-9]{10}$ ]] || fail "request $n: timestamp is not 10 digits: '$timestamp'"
+  [[ "$signature" =~ ^v1=[0-9a-f]{64}$ ]] || fail "request $n: malformed signature: '$signature'"
+  [ "${signature#v1=}" = "$(oracle_signature "$n")" ] \
+    || fail "request $n: the signature differs from the oracle's"
+}
 
 # --- run: databases ---------------------------------------------------------
 
@@ -261,35 +325,39 @@ test_success_sends_no_alert_and_records_ok() {
   grep -q '^ok' "$STATE_DIR/last-status" || fail "last-status is not ok"
 }
 
-test_failed_backup_alerts_on_telegram() {
+test_failed_backup_publishes_a_signed_event_and_skips_telegram() {
   FAKE_BACKUP_STATUS=3 run_backup run
   assert_status 1
-  local call; call="$(calls | grep '^curl')" || fail "no Telegram alert"
-  [[ "$call" == *"api.telegram.org/bot123:abc/sendMessage"* ]] || fail "wrong bot URL: $call"
-  [[ "$call" == *"chat_id=42"* ]] || fail "wrong chat: $call"
-  [[ "$call" == *"restic backup"* ]] || fail "alert does not say what failed: $call"
+  assert_ingest_count 1
+  assert_telegram_count 0
+  assert_signed_request 1
+  jq -e --arg host "$NOTIFY_INGEST_HOST_ID" \
+    '.v == 1 and .source == "backup" and .hostId == $host and .key == "backup-failed"
+     and .state == "open" and (.eventId | test("^backup-failed:[0-9]+$"))
+     and (.data.errors | any(contains("restic backup")))' "$CAPTURE/ingest-1.body" >/dev/null \
+    || fail "unexpected event: $(cat "$CAPTURE/ingest-1.body")"
   grep -q '^failed' "$STATE_DIR/last-status" || fail "last-status is not failed"
 }
 
-test_failed_retention_alerts() {
+test_failed_retention_publishes_to_the_hub() {
   FAKE_FORGET_STATUS=1 run_backup run
   assert_status 1
-  calls | grep -q '^curl' || fail "no alert when forget/prune fails"
+  assert_ingest_count 1
 }
 
-test_missing_password_fails_and_alerts() {
+test_missing_password_fails_and_publishes_to_the_hub() {
   RESTIC_PASSWORD="" run_backup run
   assert_status 1
   assert_output_contains "RESTIC_PASSWORD"
-  calls | grep -q '^curl' || fail "no alert"
+  assert_ingest_count 1
   restic_call backup && fail "backed up without a password"
   return 0
 }
 
-test_failure_without_telegram_still_fails() {
-  TELEGRAM_BOT_TOKEN="" FAKE_BACKUP_STATUS=1 run_backup run
+test_failure_without_ingest_or_telegram_still_fails() {
+  NOTIFY_INGEST_URL="" TELEGRAM_BOT_TOKEN="" FAKE_BACKUP_STATUS=1 run_backup run
   assert_status 1
-  calls | grep -q '^curl' && fail "curl called without a bot token"
+  calls | grep -q '^curl' && fail "curl called with no ingest and no bot token"
   return 0
 }
 

@@ -145,6 +145,43 @@ alert() {
     || log "could not send the Telegram alert"
 }
 
+ingest_configured() {
+  [ -n "${NOTIFY_INGEST_URL:-}" ] && [ -n "${NOTIFY_INGEST_SECRET:-}" ] && [ -n "${NOTIFY_INGEST_HOST_ID:-}" ]
+}
+
+# Publishes one signed event to the hub ingest (contract v1) and succeeds only on a 2xx.
+# The body is built by jq from arguments, so error text cannot break or extend the JSON; the
+# errors are capped like the hub schema (5 of at most 200 characters). Timestamp and
+# signature are computed on every call: the hub only accepts a 300 s window.
+ingest_post() {
+  local state="$1" event_id="$2" body timestamp signature code
+  body="$(jq -nc --arg eventId "$event_id" --arg hostId "$NOTIFY_INGEST_HOST_ID" --arg state "$state" \
+    '$ARGS.positional | map(.[0:200]) | .[0:5] as $errors
+     | {v: 1, source: "backup", eventId: $eventId, hostId: $hostId, key: "backup-failed",
+        state: $state, data: {errors: $errors}}' --args -- "${errors[@]}")" || return 1
+  timestamp="$(date +%s)"
+  signature="$(printf '%s.%s' "$timestamp" "$body" \
+    | openssl dgst -sha256 -hmac "$NOTIFY_INGEST_SECRET" | sed 's/^.* //')" || return 1
+  # The bytes sent are exactly the bytes signed: the body goes through stdin, untouched.
+  code="$(printf '%s' "$body" | curl -sS --max-time 10 -o /dev/null -w '%{http_code}' \
+    -H 'Content-Type: application/json' \
+    -H "X-Ingest-Timestamp: $timestamp" -H "X-Ingest-Signature: v1=$signature" \
+    --data-binary @- "$NOTIFY_INGEST_URL")" || code=000
+  [[ "$code" == 2[0-9][0-9] ]] || { log "hub ingest did not confirm the $state event (HTTP $code)"; return 1; }
+}
+
+# Tells the hub that the backup failed; the Telegram alert is only the way out when the hub
+# does not confirm. `errors` holds what failed.
+report_failure() {
+  local event_id
+  event_id="backup-failed:$(date +%s)"
+  if ingest_configured && ingest_post open "$event_id"; then
+    log "failure published to the hub"
+    return 0
+  fi
+  alert "$(printf 'Backup of %s FAILED:\n' "$BACKUP_HOST"; printf -- '- %s\n' "${errors[@]}")"
+}
+
 finish() {
   if [ "${#errors[@]}" -eq 0 ]; then
     echo "ok $(date -Iseconds)" > "$STATE_DIR/last-status"
@@ -152,7 +189,7 @@ finish() {
     return 0
   fi
   echo "failed $(date -Iseconds)" > "$STATE_DIR/last-status"
-  alert "$(printf 'Backup of %s FAILED:\n' "$BACKUP_HOST"; printf -- '- %s\n' "${errors[@]}")"
+  report_failure
   return 1
 }
 
