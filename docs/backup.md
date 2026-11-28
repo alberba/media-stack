@@ -15,8 +15,12 @@ apps pueden volver a descargar a partir de lo que recuerdan sus datos.
   en Google Drive (los 15 GB gratis sobran) a través de [rclone](https://rclone.org).
 - **Cuándo**: cada noche a las 04:00 (`BACKUP_SCHEDULE`, en tu `TZ`). Conserva 7
   copias diarias, 4 semanales y 6 mensuales, y borra el resto.
-- **Avisos**: un mensaje de Telegram si una copia falla, y el contenedor `backup` pasa
-  a `unhealthy` hasta que la siguiente salga bien.
+- **Avisos**: una copia que falla se publica en el hub como un evento firmado (con
+  hasta tres intentos en unos dos minutos) y el hub decide cómo avisarte; solo si
+  ninguno recibe un 2xx se envía un aviso directo por Telegram, con un prefijo fijo, el
+  host y la hora. Una copia correcta no avisa. Además, el contenedor `backup` pasa a
+  `unhealthy` hasta que la siguiente salga bien. Detalle en
+  [Avisos de una copia fallida](#avisos-de-una-copia-fallida).
 
 ## Qué guardar en el gestor de contraseñas
 
@@ -44,7 +48,10 @@ En `.env`:
 ```sh
 COMPOSE_PROFILES=backup          # o por ejemplo "vo,backup"
 RESTIC_PASSWORD=...              # genera una: openssl rand -base64 32
-TELEGRAM_BOT_TOKEN=...           # opcional: reutiliza el bot que ya uses para avisos
+NOTIFY_INGEST_URL=...            # URL completa del ingest del hub, alcanzable desde el contenedor
+NOTIFY_INGEST_SECRET=...         # el mismo NOTIFY_INGEST_SECRET del .env del hub
+NOTIFY_INGEST_HOST_ID=nas-home   # el id de este host en el hub
+TELEGRAM_BOT_TOKEN=...           # opcional: último recurso si el hub no confirma
 TELEGRAM_CHAT_ID=...
 ```
 
@@ -102,10 +109,37 @@ Solo hace falta el servicio `backup`: `docker compose up -d --build backup`. Las
 variables del Núcleo en `.env` tienen que tener valor igualmente, porque Compose lee el
 fichero entero.
 
+## Avisos de una copia fallida
+
+Cuando una copia falla, `media-backup` publica un evento `backup-failed` firmado
+(HMAC-SHA256) en `NOTIFY_INGEST_URL`. El hub lo convierte en una incidencia y la avisa
+según su política.
+
+- **Intentos**: hasta tres, con el mismo `eventId`, en unos dos minutos
+  (`INGEST_RETRY_DELAYS`, por defecto `0 30 60` segundos). Solo un 2xx cuenta como
+  confirmación; cualquier otro código, o un fallo de red, sigue con el siguiente intento.
+- **Último recurso**: si ningún intento recibe un 2xx, o el ingest no está configurado
+  (hacen falta las tres variables `NOTIFY_INGEST_*`), la copia envía una sola vez un
+  aviso directo por Telegram con `TELEGRAM_BOT_TOKEN` y `TELEGRAM_CHAT_ID`. Empieza por
+  un prefijo fijo que lo distingue de los avisos del hub y lleva el host, la hora y los
+  errores. Es el único aviso directo que queda en la Plantilla y solo existe para
+  `backup-failed`.
+- **Una copia correcta no avisa**: no envía nada, ni al hub ni a Telegram.
+- **Duplicado conocido**: si el hub estaba caído o confirmó tarde, llega el aviso
+  directo y, cuando el hub vuelve, puede abrir también la incidencia del mismo fallo.
+  Es comportamiento aceptado, no un defecto.
+
+Comprueba cada camino sin esperar a un fallo real:
+
+```sh
+docker compose exec backup media-backup notify-test ingest     # abre y cierra una incidencia de prueba en el hub
+docker compose exec backup media-backup notify-test fallback   # envía un aviso directo de prueba por Telegram
+```
+
 ## Comprobarlo
 
-- `docker compose ps backup`: `healthy` salvo que la última copia fallara. Telegram solo
-  se entera de las copias que fallan; si el contenedor está parado no se ejecuta nada y
+- `docker compose ps backup`: `healthy` salvo que la última copia fallara. Los avisos
+  solo salen de las copias que fallan; si el contenedor está parado no se ejecuta nada y
   no llega ningún aviso, así que vigila también su estado con tu monitorización.
 - `docker compose logs backup`: la salida de cada copia.
 - `docker compose exec backup restic snapshots`: todas las copias conservadas.

@@ -458,6 +458,7 @@ test_a_successful_backup_never_notifies_anyone() {
 }
 
 test_error_text_cannot_break_or_extend_the_event() {
+  # shellcheck disable=SC2016  # the $(...) in the name must stay literal
   printf 'SQLite format 3\0garbage' > "$SOURCE_DIR/radarr/"'q"b\s {"k":"x"} $(id).db'
   FAKE_BACKUP_STATUS=3 run_backup run
   assert_ingest_count 1

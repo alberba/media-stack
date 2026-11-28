@@ -265,6 +265,36 @@
     "secret": true,
     "wire": false
   },
+  "NOTIFY_INGEST_HOST_ID": {
+    "scopes": {
+      "instance": {
+        "default": "nas-home",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
+  "NOTIFY_INGEST_SECRET": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": true,
+    "wire": false
+  },
+  "NOTIFY_INGEST_URL": {
+    "scopes": {
+      "instance": {
+        "default": "",
+        "required": false
+      }
+    },
+    "secret": false,
+    "wire": false
+  },
   "OPENVPN_PASSWORD": {
     "scopes": {
       "instance": {
