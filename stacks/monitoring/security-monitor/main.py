@@ -1,4 +1,4 @@
-"""Notify only published image updates with verified security improvements."""
+"""Compare running images with published updates and count the verified security improvements."""
 import base64
 import datetime
 import fcntl
@@ -12,7 +12,6 @@ from pathlib import Path
 import socket
 import subprocess
 import sys
-import urllib.parse
 import urllib.request
 
 
@@ -165,49 +164,14 @@ def scan(image_ref, report_path, source='docker', platform=None):
     return json.loads(report_path.read_text())
 
 
-def telegram(message):
-    token, chat = os.environ.get('TELEGRAM_BOT_TOKEN'), os.environ.get('TELEGRAM_CHAT_ID')
-    if not token or not chat:
-        raise RuntimeError('Telegram is not configured; findings remain pending')
-    data = urllib.parse.urlencode({'chat_id': chat, 'text': message, 'disable_web_page_preview': 'true'}).encode()
-    request = urllib.request.Request(f'https://api.telegram.org/bot{token}/sendMessage', data=data)
-    with urllib.request.urlopen(request, timeout=30) as response:
-        if not json.load(response).get('ok'):
-            raise RuntimeError('Telegram rejected notification')
-
-
 def atomic_json(path, data):
     temporary = path.with_suffix('.tmp')
     temporary.write_text(json.dumps(data, ensure_ascii=False))
     temporary.replace(path)
 
 
-def digest(updates):
-    title = ('1 actualización de seguridad verificada' if len(updates) == 1 else
-             f'{len(updates)} actualizaciones de seguridad verificadas')
-    lines = [f"{os.environ.get('MONITOR_NAME', 'Media Stack')} — {title}"]
-    for update in updates:
-        names = ', '.join(sorted(update['names']))
-        local_tag = update['local_ref'].rsplit(':', 1)[-1]
-        remote_tag = update['remote_ref'].rsplit(':', 1)[-1]
-        cves = update['fixed']
-        examples = ', '.join(sorted(cves, key=lambda c: (cves[c] != 'CRITICAL', c))[:3])
-        noun = 'CVE' if len(cves) == 1 else 'CVEs'
-        lines.append(f'{names}: {local_tag} → {remote_tag}\n'
-                     f'Corrige {len(cves)} {noun} HIGH/CRITICAL: {examples}' +
-                     (f' y {len(cves)-3} más' if len(cves) > 3 else ''))
-    lines.append('Comparación de las imágenes con Trivy. No se ha actualizado ningún contenedor.')
-    # Keep a single bounded digest, even for very large fleets.
-    message = '\n\n'.join(lines)
-    if len(message) > 3500:
-        message = lines[0] + '\n\n' + '\n'.join(
-            f'{u["remote_ref"]}: {len(u["fixed"])} CVEs corregidas' for u in updates)
-        message = message[:3300] + '\nDetalles en security-monitor/comparisons.'
-    return message
-
-
 def run(state, discover=running_images, candidates=wud_containers, scanner=scan,
-        notify=telegram, prepare=update_database):
+        prepare=update_database):
     state.mkdir(parents=True, exist_ok=True)
     (state / 'tmp').mkdir(exist_ok=True)
     reports = state / 'reports'
@@ -255,10 +219,9 @@ def run(state, discover=running_images, candidates=wud_containers, scanner=scan,
         if updates and os.environ.get('SECURITY_AUTO_UPDATE') == 'on':
             print('Verified updates ready for the host auto-updater', flush=True)
         elif updates:
-            notify(digest(updates))
-            print(f'Security update digest delivered: {len(updates)} image updates', flush=True)
+            print(f'Verified security updates: {len(updates)} image updates', flush=True)
         else:
-            print('No new verified security updates; no Telegram notification', flush=True)
+            print('No new verified security updates', flush=True)
         atomic_json(history_path, next_history)
         atomic_json(state / 'last-status.json', {
             'time': datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -295,7 +258,7 @@ if __name__ == '__main__':
     try:
         sys.exit(main())
     except Exception as error:
-        # HTTP exceptions may contain the bot token: never print their message/traceback.
+        # Exceptions may contain registry credentials: never print their message/traceback.
         print(f'Security monitor failed ({type(error).__name__}); inspect scan status/configuration', file=sys.stderr)
         if not isinstance(error, BlockingIOError):
             state = Path(os.environ.get('STATE_DIR', '/state'))
