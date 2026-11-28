@@ -9,7 +9,9 @@ REPO="$(cd "$(dirname "$0")/.." && pwd)"
 PYTHONPATH="$REPO/stacks/extras/issue-automator" python3 -B - <<'EOF'
 import hashlib
 import hmac
+import http.client
 import json
+import threading
 import unittest
 from unittest import mock
 
@@ -222,6 +224,80 @@ class Publish(unittest.TestCase):
         self.assertEqual(self.net.deliveries(), [])
         self.assertFalse(result["published"])
         self.assertEqual(result["status"], "success")
+
+    def webhook(self, payload, path="/webhook"):
+        """POSTs through the real HTTP handler; returns (status, parsed body)."""
+        server = main.ThreadingHTTPServer(("127.0.0.1", 0), main.WebhookHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        conn.request("POST", path, body=json.dumps(payload), headers={"Content-Type": "application/json"})
+        response = conn.getresponse()
+        body = json.loads(response.read())
+        conn.close()
+        return response.status, body
+
+    def test_a_resolved_issue_publishes_one_closing_and_runs_no_automation(self):
+        result = main.process_webhook_payload({"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
+        self.assertEqual(len(self.net.deliveries()), 1)
+        event = json.loads(self.net.deliveries()[0]["data"])
+        self.assertEqual(event["state"], "resolved")
+        self.assertEqual(event["eventId"], "issue:7:resolved")
+        self.assertEqual(event["key"], "issue:seerr:7")
+        self.assertEqual(event["data"], {})
+        self.assertEqual(self.net.manager_calls(), [])
+        self.assertTrue(result["published"])
+
+    def test_a_resolved_issue_id_can_come_from_any_of_the_three_places(self):
+        for payload in ({"issue": {"id": 7}}, {"issue": {"issue_id": "7"}}, {"issue_id": "7"}):
+            self.net.calls.clear()
+            main.process_webhook_payload(dict(payload, notification_type="ISSUE_RESOLVED"))
+            event = json.loads(self.net.deliveries()[0]["data"])
+            self.assertEqual((event["key"], event["state"]), ("issue:seerr:7", "resolved"))
+            self.assertEqual(self.net.manager_calls(), [])
+
+    def test_test_notifications_send_nothing_anywhere(self):
+        for payload in ({"notification_type": "TEST_NOTIFICATION"}, {"event": "test"}):
+            result = main.process_webhook_payload(payload)
+            self.assertEqual(result["status"], "ok")
+        self.assertEqual(self.net.calls, [])
+
+    def test_other_notification_types_are_ignored_without_effects(self):
+        for kind in ("ISSUE_COMMENT", "ISSUE_REOPENED"):
+            result = main.process_webhook_payload({"notification_type": kind, "issue": {"issue_id": "7"}})
+            self.assertEqual(result["status"], "ignored")
+        self.assertEqual(self.net.calls, [])
+
+    def test_a_payload_without_a_type_still_runs_the_automation(self):
+        result = main.process_webhook_payload({"issue": {"issue_id": "7"}})
+        self.assertTrue(self.net.to("/api/v3/command"))
+        self.assertEqual(len(self.net.deliveries()), 1)
+        self.assertEqual(result["status"], "success")
+
+    def test_the_test_endpoint_answers_200_and_sends_nothing(self):
+        status, body = self.webhook({}, path="/test")
+        self.assertEqual(status, 200)
+        self.assertTrue(body["ingest_configured"])
+        self.assertEqual(self.net.calls, [])
+
+    def test_an_accepted_delivery_is_reported_as_published(self):
+        self.net.ingest_status = 202
+        status, body = self.webhook({"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
+        self.assertEqual(status, 200)
+        self.assertTrue(body["published"])
+
+    def test_a_failed_delivery_is_one_attempt_and_the_webhook_still_answers_200(self):
+        for code in (401, 409, 422, 500):
+            self.net.calls.clear()
+            self.net.ingest_status = code
+            status, body = self.webhook({"notification_type": "ISSUE_CREATED", "issue": {"issue_id": "7"}})
+            self.assertEqual(status, 200, code)
+            self.assertEqual(len(self.net.deliveries()), 1, code)
+            self.assertFalse(body["published"], code)
+            self.assertTrue(body["action_success"], code)
 
     def test_a_non_numeric_issue_id_is_not_published(self):
         self.assertIsNone(main.numeric_issue_id("7; drop"))
