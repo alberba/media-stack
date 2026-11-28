@@ -8,6 +8,8 @@
 #   media-backup run                one backup now: databases, restic backup, retention
 #   media-backup restore DIR [ID]   restore snapshot ID (default: the latest) into DIR
 #   media-backup summary DIR        movies, series, indexers and Jellyfin users found in DIR
+#   media-backup notify-test ingest|fallback
+#                                   check the failure notice path without a real failure
 #   anything else                   run as is, e.g. `restic snapshots` or `rclone config`
 set -uo pipefail
 
@@ -17,6 +19,11 @@ STATE_DIR="${STATE_DIR:-/config}"        # rclone.conf, restic cache, last statu
 CRONTAB_FILE="${CRONTAB_FILE:-/tmp/crontab}"
 BACKUP_HOST="${BACKUP_HOST:-media-stack}"
 BACKUP_SCHEDULE="${BACKUP_SCHEDULE:-0 4 * * *}"
+# A failed backup is published to the hub (NOTIFY_INGEST_*); the hub decides how to notify.
+# Only when no attempt gets a 2xx does the backup send a direct Telegram notice, which starts
+# with this prefix so it is never mistaken for a notice from the hub.
+INGEST_RETRY_DELAYS="${INGEST_RETRY_DELAYS:-0 30 60}"   # seconds before each attempt
+DIRECT_NOTICE_PREFIX="${DIRECT_NOTICE_PREFIX:-Aviso directo de media-stack: el hub no confirmó}"
 
 # Never backed up because it can be regenerated: caches, artwork and metadata, extracted
 # subtitles, logs and the apps' own zip backups. A pattern without "/" matches a file or
@@ -134,15 +141,21 @@ ensure_repository() {
   esac
 }
 
-alert() {
+# The last resort, only for a failed backup: a direct Telegram message through the same bot.
+# The token goes through curl's config on stdin, never through argv. NOTE is an extra line.
+direct_notice() {
   if [ -z "${TELEGRAM_BOT_TOKEN:-}" ] || [ -z "${TELEGRAM_CHAT_ID:-}" ]; then
-    log "Telegram is not configured, no alert sent"
-    return
+    log "Telegram is not configured, no direct notice sent"
+    return 1
   fi
-  curl -fsS --max-time 20 -o /dev/null \
-    --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" --data-urlencode "text=$1" \
-    "https://api.telegram.org/bot$TELEGRAM_BOT_TOKEN/sendMessage" \
-    || log "could not send the Telegram alert"
+  local text
+  text="$(printf '%s\n%s %s\n' "$DIRECT_NOTICE_PREFIX" "$BACKUP_HOST" "$(date -Iseconds)"
+    [ -n "${1:-}" ] && printf '%s\n' "$1"
+    [ "${#errors[@]}" -gt 0 ] && printf -- '- %s\n' "${errors[@]}")"
+  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$TELEGRAM_BOT_TOKEN" \
+    | curl -fsS --max-time 20 -o /dev/null -K - \
+      --data-urlencode "chat_id=$TELEGRAM_CHAT_ID" --data-urlencode "text=$text" \
+    || { log "could not send the direct Telegram notice"; return 1; }
 }
 
 ingest_configured() {
@@ -170,16 +183,34 @@ ingest_post() {
   [[ "$code" == 2[0-9][0-9] ]] || { log "hub ingest did not confirm the $state event (HTTP $code)"; return 1; }
 }
 
-# Tells the hub that the backup failed; the Telegram alert is only the way out when the hub
-# does not confirm. `errors` holds what failed.
+# Up to one attempt per word of INGEST_RETRY_DELAYS, all with the same eventId (the hub
+# deduplicates on it), each one signed again. Only a 2xx confirms.
+publish_with_retries() {
+  local event_id="$1" delay
+  local -a delays
+  read -r -a delays <<< "$INGEST_RETRY_DELAYS"
+  for delay in "${delays[@]}"; do
+    sleep "$delay"
+    ingest_post open "$event_id" && return 0
+  done
+  return 1
+}
+
+# Tells the hub that the backup failed (`errors` holds what failed). The direct Telegram
+# notice is only the way out when the hub is not configured or never confirms.
 report_failure() {
   local event_id
   event_id="backup-failed:$(date +%s)"
-  if ingest_configured && ingest_post open "$event_id"; then
-    log "failure published to the hub"
-    return 0
+  if ingest_configured; then
+    if publish_with_retries "$event_id"; then
+      log "failure published to the hub"
+      return 0
+    fi
+    log "the hub did not confirm the failure"
+  else
+    log "the hub ingest is not configured"
   fi
-  alert "$(printf 'Backup of %s FAILED:\n' "$BACKUP_HOST"; printf -- '- %s\n' "${errors[@]}")"
+  direct_notice
 }
 
 finish() {
@@ -281,10 +312,34 @@ cmd_summary() {
   done < <(find "$dir" -type f \( -name radarr.db -o -name sonarr.db -o -name prowlarr.db -o -name jellyfin.db \) | sort)
 }
 
+# Exercises each notice path without a real failure. `ingest` opens and then resolves a test
+# incident in the hub; `fallback` sends the direct Telegram notice.
+cmd_notify_test() {
+  local stamp
+  case "${1:-}" in
+    ingest)
+      ingest_configured || die "NOTIFY_INGEST_URL, NOTIFY_INGEST_SECRET and NOTIFY_INGEST_HOST_ID must be set"
+      stamp="$(date +%s)"
+      errors=("notify-test: a test event, no backup failed")
+      ingest_post open "backup-failed:test-$stamp:open" || die "the hub did not confirm the test event"
+      errors=()
+      ingest_post resolved "backup-failed:test-$stamp:resolved" || die "the hub did not confirm closing the test event"
+      log "the hub confirmed the test event and its closing" ;;
+    fallback)
+      errors=()
+      direct_notice "notify-test: a test notice, no backup failed" || die "the direct notice was not sent"
+      log "direct notice sent" ;;
+    *)
+      echo "usage: media-backup notify-test ingest|fallback" >&2
+      exit 2 ;;
+  esac
+}
+
 case "${1:-schedule}" in
   schedule) cmd_schedule ;;
   run) cmd_run ;;
   restore) shift; cmd_restore "$@" ;;
   summary) shift; cmd_summary "$@" ;;
+  notify-test) shift; cmd_notify_test "$@" ;;
   *) exec "$@" ;;
 esac
