@@ -1,5 +1,5 @@
 # The Wiring: Recyclarr's image (for the quality profiles) plus Python for the rest.
-FROM ghcr.io/recyclarr/recyclarr:8.8.1
+FROM ghcr.io/recyclarr/recyclarr:9.0.0
 USER root
 RUN apk add --no-cache python3
 COPY wire /opt/wire/wire
