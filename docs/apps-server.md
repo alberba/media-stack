@@ -21,9 +21,8 @@ sudo systemctl start media-stack-apps-security-updates.service
 ```
 
 `APPS_BIND_IP` es la dirección privada de este servidor; por defecto solo escucha en
-loopback. WUD sigue en loopback con `WUD_BIND_IP`. Configura Telegram para recibir
-avisos; sin él los avisos pendientes se conservan para un siguiente intento. Usa
-`MONITOR_NAME` para distinguir las notificaciones de cada host.
+loopback. WUD sigue en loopback con `WUD_BIND_IP`. Usa
+`MONITOR_NAME` para distinguir las salidas de cada host.
 
 Seerr se configura desde su interfaz con las direcciones privadas del NAS para
 Jellyfin, Radarr y Sonarr. En una migración, para Seerr en el origen, copia todos sus

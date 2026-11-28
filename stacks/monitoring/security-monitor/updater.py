@@ -70,10 +70,6 @@ def manual_reason(plan, now=None):
     return None
 
 
-def notify_outcome(result):
-    return result != 'manual: unclassified version change'
-
-
 class Host:
     def __init__(self, repo, state, appdata, *, timeout=300, stable=30):
         self.repo, self.state, self.appdata = Path(repo), Path(state), Path(appdata).resolve()
@@ -294,20 +290,6 @@ def set_setting(repo, name, value):
              '--scope', project_scope(repo), '--file', str(repo / '.env'), '--name', name], cwd=repo, stdin=value)
 
 
-def notify(message):
-    command(['docker', 'exec', '-i', 'security-monitor', 'python3', '-c',
-             'import sys; sys.path.insert(0,"/app"); import main; main.telegram(sys.stdin.read())'], stdin=message)
-
-
-def flush_notifications(state):
-    path = state / 'update-notifications.json'
-    queued = json.loads(path.read_text()) if path.exists() else []
-    while queued:
-        notify(queued[0])
-        queued.pop(0)
-        atomic_json(path, queued)
-
-
 def run(repo, *, scan=True):
     if setting(repo, 'SECURITY_AUTO_UPDATE') != 'on':
         print('Security auto-updates are off')
@@ -318,7 +300,6 @@ def run(repo, *, scan=True):
     host = Host(repo, state, appdata)
     with (state / 'update.lock').open('w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        flush_notifications(state)
         if host.pending.exists():
             transaction = json.loads(host.pending.read_text())
             committed = host.transactions / (transaction['id'] + '.json')
@@ -326,7 +307,7 @@ def run(repo, *, scan=True):
                 host.pending.unlink()
             else:
                 host.rollback(transaction)
-                notify(label + ' — recuperación completada: ' + transaction['service'])
+                print(label + ' — recuperación completada: ' + transaction['service'])
         if scan:
             # A failed comparison batch must not trigger automatic mutations.
             host.compose('exec', '-T', 'security-monitor', 'python3', '/app/main.py', 'run')
@@ -364,18 +345,11 @@ def run(repo, *, scan=True):
                 atomic_json(attempted_path, attempted)
                 outcome = f'{service} → {plan["remote_ref"].rsplit(":", 1)[-1]}: {result}'
                 print(outcome, flush=True)
-                if notify_outcome(result):
-                    outcomes.append(outcome)
+                outcomes.append(outcome)
                 if host.pending.exists():
                     break
             if host.pending.exists():
                 break
-        if outcomes:
-            outbox = state / 'update-notifications.json'
-            queued = json.loads(outbox.read_text()) if outbox.exists() else []
-            queued.append(label + ' — autoactualización de seguridad\n\n' + '\n'.join(outcomes))
-            atomic_json(outbox, queued)
-            flush_notifications(state)
         return 1 if host.pending.exists() or any(': rollback:' in line or ': ERROR:' in line for line in outcomes) else 0
 
 
@@ -509,7 +483,7 @@ def main():
         command(['systemctl', 'disable', unit + '.service'])
         set_setting(repo, 'SECURITY_AUTO_UPDATE', 'off')
         command(['docker', 'compose', 'up', '-d', '--no-deps', 'security-monitor'], cwd=repo)
-        print('Auto-updates disabled; verified security notifications remain enabled')
+        print('Auto-updates disabled; the monitor keeps comparing images and counting verified security updates')
         return 0
     raise ValueError('Usage: security-update.sh install|run|apply-verified|disable|release-pins')
 

@@ -145,22 +145,6 @@ class Deployment:
                 return sorted(set(result), key=version)
         raise RuntimeError('Too many release pages')
 
-    def notify(self, message):
-        # Persistent outbox, same notification transport as verified security updates.
-        path = self.state / 'notifications.json'
-        queue = json.loads(path.read_text()) if path.exists() else []
-        if message:
-            queue.append((self.env.get('MONITOR_NAME') or self.scope) + ' — ' + message)
-            updater.atomic_json(path, queue)
-        while queue:
-            try:
-                updater.notify(queue[0])
-            except Exception:
-                print('Notification pending; deployment state is retained')
-                return
-            queue.pop(0)
-            updater.atomic_json(path, queue)
-
     def initialize(self, persist=True):
         tags = self.releases()
         if not tags:
@@ -339,12 +323,10 @@ class Deployment:
             transaction['status'] = 'updated'
             updater.atomic_json(folder / 'result.json', transaction)
             self.journal.unlink()
-            if changed:
-                self.notify(f'{tag} aplicada y verificada; servicios: ' + ', '.join(changed))
             print(tag + ': ' + (', '.join(changed) or 'no affected services'))
         except Exception:
             self.restore(transaction)
-            self.notify(f'{tag} falló; restaurados código, imágenes y datos anteriores')
+            print(f'{tag} falló; restaurados código, imágenes y datos anteriores', file=sys.stderr)
             raise
 
     def configuration_key(self):
@@ -392,8 +374,6 @@ class Deployment:
                         except Exception:
                             updater.atomic_json(failed, {'release': tag, 'configuration': self.configuration_key()})
                             raise
-                if not dry:
-                    self.notify(None)
 
     def install(self):
         if os.geteuid() != 0:

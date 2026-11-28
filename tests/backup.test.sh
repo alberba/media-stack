@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Tests for stacks/backup/media-backup.sh. restic, curl and supercronic are fakes on
-# PATH; sqlite3 is the real one, so the database copies are real online backups.
+# PATH; sqlite3 is the real one, so the database copies are real online backups. The
+# signature of every event published to the hub is checked against an independent HMAC
+# oracle written in Python.
 # Usage: tests/backup.test.sh
 set -uo pipefail
 
@@ -15,6 +17,10 @@ setup() {
   export CRONTAB_FILE="$SANDBOX/crontab"
   export RESTIC_REPOSITORY="rclone:gdrive:media-stack" RESTIC_PASSWORD="correct horse"
   export TELEGRAM_BOT_TOKEN="123:abc" TELEGRAM_CHAT_ID="42"
+  export NOTIFY_INGEST_URL="http://hub.test/api/notifications/ingest"
+  export NOTIFY_INGEST_SECRET="ingest-test-secret-0123456789abcdef" NOTIFY_INGEST_HOST_ID="nas-home"
+  export INGEST_RETRY_DELAYS="0 0 0" FAKE_INGEST_CODES="202"
+  export DIRECT_NOTICE_PREFIX="DIRECT-NOTICE-PREFIX"
   export BACKUP_EXCLUDE="" BACKUP_SCHEDULE=""
   export FAKE_LOG="$SANDBOX/calls.log" CAPTURE="$SANDBOX/capture"
   export FAKE_CAT_CONFIG_STATUS=0 FAKE_BACKUP_STATUS=0 FAKE_FORGET_STATUS=0
@@ -38,9 +44,41 @@ case "$1" in
 esac
 exit 0
 EOF
+  # curl: logs every call. A call that reads a config from stdin (-K) is the direct
+  # Telegram notice; one that sends --data-binary is a hub ingest request. Each is saved
+  # as $CAPTURE/telegram-N.* or $CAPTURE/ingest-N.*; the HTTP code of ingest request N is
+  # the Nth word of FAKE_INGEST_CODES (the last one repeats), and 000 is a network failure.
   cat > "$SANDBOX/bin/curl" <<'EOF'
 #!/usr/bin/env bash
 echo "curl ${*//$'\n'/ }" >> "$FAKE_LOG"
+args=("$@"); kind=other; headers=(); want_code=0
+for ((i = 0; i < ${#args[@]}; i++)); do
+  case "${args[i]}" in
+    -K) kind=telegram ;;
+    --data-binary) kind=ingest ;;
+    -H) headers+=("${args[i+1]}") ;;
+    -w) want_code=1 ;;
+  esac
+done
+next() { local n=1; while [ -e "$CAPTURE/$1-$n.args" ]; do n=$((n + 1)); done; echo "$n"; }
+case "$kind" in
+  telegram)
+    n="$(next telegram)"
+    printf '%s\n' "$@" > "$CAPTURE/telegram-$n.args"
+    cat > "$CAPTURE/telegram-$n.stdin"
+    exit "${FAKE_TELEGRAM_STATUS:-0}" ;;
+  ingest)
+    n="$(next ingest)"
+    printf '%s\n' "$@" > "$CAPTURE/ingest-$n.args"
+    printf '%s\n' "${headers[@]}" > "$CAPTURE/ingest-$n.headers"
+    cat > "$CAPTURE/ingest-$n.body"
+    read -ra codes <<< "${FAKE_INGEST_CODES:-202}"
+    code="${codes[n-1]:-${codes[${#codes[@]}-1]}}"
+    [ "$want_code" = 1 ] && printf '%s' "$code"
+    [ "$code" = 000 ] && exit 7
+    exit 0 ;;
+esac
+exit 0
 EOF
   cat > "$SANDBOX/bin/supercronic" <<'EOF'
 #!/usr/bin/env bash
@@ -73,6 +111,33 @@ assert_not_excluded() {
   [[ "$(restic_call backup)" != *"$1"* ]] || fail "$1 is excluded: $(restic_call backup)"
 }
 restic_call() { grep "^restic $1" "$FAKE_LOG" 2>/dev/null; }
+
+# --- the hub ingest and the direct Telegram notice --------------------------
+count_captured() { find "$CAPTURE" -maxdepth 1 -name "$1-*.args" | wc -l; }
+ingest_count() { count_captured ingest; }
+telegram_count() { count_captured telegram; }
+assert_ingest_count() { [ "$(ingest_count)" = "$1" ] || fail "expected $1 ingest requests, got $(ingest_count)"; }
+assert_telegram_count() { [ "$(telegram_count)" = "$1" ] || fail "expected $1 direct notices, got $(telegram_count)"; }
+header_value() { sed -n "s/^$2: //p" "$CAPTURE/ingest-$1.headers"; }
+event_id_of() { jq -r .eventId "$CAPTURE/ingest-$1.body"; }
+# The independent oracle: HMAC-SHA256 over "<timestamp>.<body>" computed by Python.
+oracle_signature() {
+  python3 -I - "$CAPTURE/ingest-$1.body" "$(header_value "$1" X-Ingest-Timestamp)" <<'PY'
+import hashlib, hmac, os, sys
+body = open(sys.argv[1], "rb").read()
+key = os.environ["NOTIFY_INGEST_SECRET"].encode()
+print(hmac.new(key, sys.argv[2].encode() + b"." + body, hashlib.sha256).hexdigest())
+PY
+}
+assert_signed_request() {
+  local n="$1" timestamp signature
+  timestamp="$(header_value "$n" X-Ingest-Timestamp)"
+  signature="$(header_value "$n" X-Ingest-Signature)"
+  [[ "$timestamp" =~ ^[0-9]{10}$ ]] || fail "request $n: timestamp is not 10 digits: '$timestamp'"
+  [[ "$signature" =~ ^v1=[0-9a-f]{64}$ ]] || fail "request $n: malformed signature: '$signature'"
+  [ "${signature#v1=}" = "$(oracle_signature "$n")" ] \
+    || fail "request $n: the signature differs from the oracle's"
+}
 
 # --- run: databases ---------------------------------------------------------
 
@@ -261,36 +326,215 @@ test_success_sends_no_alert_and_records_ok() {
   grep -q '^ok' "$STATE_DIR/last-status" || fail "last-status is not ok"
 }
 
-test_failed_backup_alerts_on_telegram() {
+test_failed_backup_publishes_a_signed_event_and_skips_telegram() {
   FAKE_BACKUP_STATUS=3 run_backup run
   assert_status 1
-  local call; call="$(calls | grep '^curl')" || fail "no Telegram alert"
-  [[ "$call" == *"api.telegram.org/bot123:abc/sendMessage"* ]] || fail "wrong bot URL: $call"
-  [[ "$call" == *"chat_id=42"* ]] || fail "wrong chat: $call"
-  [[ "$call" == *"restic backup"* ]] || fail "alert does not say what failed: $call"
+  assert_ingest_count 1
+  assert_telegram_count 0
+  assert_signed_request 1
+  jq -e --arg host "$NOTIFY_INGEST_HOST_ID" \
+    '.v == 1 and .source == "backup" and .hostId == $host and .key == "backup-failed"
+     and .state == "open" and (.eventId | test("^backup-failed:[0-9]+$"))
+     and (.data.errors | any(contains("restic backup")))' "$CAPTURE/ingest-1.body" >/dev/null \
+    || fail "unexpected event: $(cat "$CAPTURE/ingest-1.body")"
   grep -q '^failed' "$STATE_DIR/last-status" || fail "last-status is not failed"
 }
 
-test_failed_retention_alerts() {
+test_failed_retention_publishes_to_the_hub() {
   FAKE_FORGET_STATUS=1 run_backup run
   assert_status 1
-  calls | grep -q '^curl' || fail "no alert when forget/prune fails"
+  assert_ingest_count 1
 }
 
-test_missing_password_fails_and_alerts() {
+test_missing_password_fails_and_publishes_to_the_hub() {
   RESTIC_PASSWORD="" run_backup run
   assert_status 1
   assert_output_contains "RESTIC_PASSWORD"
-  calls | grep -q '^curl' || fail "no alert"
+  assert_ingest_count 1
   restic_call backup && fail "backed up without a password"
   return 0
 }
 
-test_failure_without_telegram_still_fails() {
-  TELEGRAM_BOT_TOKEN="" FAKE_BACKUP_STATUS=1 run_backup run
+# The text of the direct notice, as curl received it (--data-urlencode text=...).
+# The text is the last argument, so it runs from its "text=" line to the end of the file.
+direct_notice_text() { sed -n '/^text=/,$p' "$CAPTURE/telegram-$1.args" | sed '1s/^text=//'; }
+assert_direct_notice() {
+  local n="$1" text
+  [ "$(telegram_count)" -ge "$n" ] || fail "no direct notice $n"
+  text="$(direct_notice_text "$n")"
+  [[ "$text" == *"$DIRECT_NOTICE_PREFIX"* ]] || fail "the notice lacks the fixed prefix: $text"
+  [[ "$text" == *"nas-test"* ]] || fail "the notice lacks the host: $text"
+  [[ "$text" == *"restic backup"* ]] || fail "the notice lacks the errors: $text"
+  # The token reaches curl only through the config on stdin, never through its arguments.
+  grep -qF "$TELEGRAM_BOT_TOKEN" "$CAPTURE/telegram-$n.args" && fail "the bot token is in curl's arguments"
+  grep -qF "$TELEGRAM_BOT_TOKEN" "$FAKE_LOG" && fail "the bot token is in the logged call"
+  grep -qF "bot$TELEGRAM_BOT_TOKEN/sendMessage" "$CAPTURE/telegram-$n.stdin" \
+    || fail "the bot token is not in curl's stdin config"
+  grep -qF "chat_id=$TELEGRAM_CHAT_ID" "$CAPTURE/telegram-$n.args" || fail "the notice is not for the chat"
+}
+
+test_a_retry_reuses_the_event_and_a_late_2xx_sends_no_direct_notice() {
+  FAKE_INGEST_CODES="500 502 202" FAKE_BACKUP_STATUS=3 run_backup run
   assert_status 1
-  calls | grep -q '^curl' && fail "curl called without a bot token"
+  assert_ingest_count 3
+  assert_telegram_count 0
+  local n
+  for n in 1 2 3; do assert_signed_request "$n"; done
+  [ "$(event_id_of 1)" = "$(event_id_of 2)" ] && [ "$(event_id_of 2)" = "$(event_id_of 3)" ] \
+    || fail "the event id changed between attempts: $(event_id_of 1) $(event_id_of 2) $(event_id_of 3)"
+  [ "$(cat "$CAPTURE/ingest-1.body")" = "$(cat "$CAPTURE/ingest-3.body")" ] || fail "the body changed between attempts"
+}
+
+test_a_duplicate_confirmation_counts_as_confirmed() {
+  FAKE_INGEST_CODES="200" FAKE_BACKUP_STATUS=3 run_backup run
+  assert_ingest_count 1
+  assert_telegram_count 0
+}
+
+test_without_any_2xx_the_backup_sends_one_direct_notice() {
+  local codes
+  for codes in "500 500 500" "401 401 401" "409 409 409" "422 422 422" "000 000 000" "302 500 404"; do
+    rm -f "$CAPTURE"/ingest-* "$CAPTURE"/telegram-*
+    BACKUP_HOST=nas-test FAKE_INGEST_CODES="$codes" FAKE_BACKUP_STATUS=3 run_backup run
+    assert_status 1
+    assert_ingest_count 3
+    assert_telegram_count 1
+    assert_direct_notice 1
+  done
+}
+
+test_the_retries_wait_the_configured_delays() {
+  local sleeps="$SANDBOX/sleeps"
+  cat > "$SANDBOX/bin/sleep" <<'EOF'
+#!/usr/bin/env bash
+echo "$1" >> "$SLEEP_LOG"
+EOF
+  chmod +x "$SANDBOX/bin/sleep"
+  export SLEEP_LOG="$sleeps"
+  INGEST_RETRY_DELAYS="0 7 11" FAKE_INGEST_CODES="500" FAKE_BACKUP_STATUS=3 run_backup run
+  [ "$(paste -sd, "$sleeps")" = "0,7,11" ] || fail "unexpected waits: $(paste -sd, "$sleeps")"
+  assert_ingest_count 3
+}
+
+test_the_default_retry_schedule_is_three_attempts_over_about_two_minutes() {
+  grep -q 'INGEST_RETRY_DELAYS:-0 30 60' "$BACKUP" || fail "the default retry delays changed"
+}
+
+test_without_ingest_a_failed_backup_sends_one_direct_notice() {
+  NOTIFY_INGEST_URL="" BACKUP_HOST=nas-test FAKE_BACKUP_STATUS=3 run_backup run
+  assert_status 1
+  assert_ingest_count 0
+  assert_telegram_count 1
+  assert_direct_notice 1
+}
+
+test_a_partly_configured_ingest_counts_as_not_configured() {
+  NOTIFY_INGEST_SECRET="" BACKUP_HOST=nas-test FAKE_BACKUP_STATUS=3 run_backup run
+  assert_ingest_count 0
+  assert_telegram_count 1
+}
+
+test_failure_without_ingest_or_telegram_still_fails_and_says_so() {
+  NOTIFY_INGEST_URL="" TELEGRAM_BOT_TOKEN="" FAKE_BACKUP_STATUS=1 run_backup run
+  assert_status 1
+  calls | grep -q '^curl' && fail "curl called with no ingest and no bot token"
+  assert_output_contains "no direct notice sent"
+  grep -q '^failed' "$STATE_DIR/last-status" || fail "last-status is not failed"
+}
+
+test_a_failed_direct_notice_does_not_change_the_exit_status() {
+  NOTIFY_INGEST_URL="" FAKE_TELEGRAM_STATUS=22 FAKE_BACKUP_STATUS=3 run_backup run
+  assert_status 1
+  assert_telegram_count 1
+}
+
+test_a_successful_backup_never_notifies_anyone() {
+  FAKE_INGEST_CODES="500" run_backup run
+  assert_status 0
+  assert_ingest_count 0
+  assert_telegram_count 0
+  calls | grep -q '^curl' && fail "curl called on a successful backup"
   return 0
+}
+
+test_error_text_cannot_break_or_extend_the_event() {
+  # shellcheck disable=SC2016  # the $(...) in the name must stay literal
+  printf 'SQLite format 3\0garbage' > "$SOURCE_DIR/radarr/"'q"b\s {"k":"x"} $(id).db'
+  FAKE_BACKUP_STATUS=3 run_backup run
+  assert_ingest_count 1
+  assert_signed_request 1
+  jq -e '(keys == ["data","eventId","hostId","key","source","state","v"])
+         and (.data | keys) == ["errors"]
+         and (.data.errors | any(contains("q\"b\\s {\"k\":\"x\"} $(id).db")))' \
+    "$CAPTURE/ingest-1.body" >/dev/null || fail "unexpected event: $(cat "$CAPTURE/ingest-1.body")"
+}
+
+test_the_event_carries_at_most_five_errors_of_two_hundred_characters() {
+  local i long; long="$(printf 'x%.0s' $(seq 220))"
+  for i in 1 2 3 4 5 6 7; do
+    printf 'SQLite format 3\0garbage' > "$SOURCE_DIR/radarr/$long-$i.db"
+  done
+  FAKE_BACKUP_STATUS=3 run_backup run
+  assert_ingest_count 1
+  jq -e '(.data.errors | length) == 5 and (.data.errors | all(length <= 200))' "$CAPTURE/ingest-1.body" >/dev/null \
+    || fail "the errors are not capped: $(cat "$CAPTURE/ingest-1.body")"
+}
+
+# --- notify-test ------------------------------------------------------------
+
+test_notify_test_ingest_opens_and_closes_a_test_incident() {
+  run_backup notify-test ingest
+  assert_status 0
+  assert_ingest_count 2
+  assert_telegram_count 0
+  assert_signed_request 1
+  assert_signed_request 2
+  [ "$(jq -r .state "$CAPTURE/ingest-1.body")" = open ] || fail "the first event is not open"
+  [ "$(jq -r .state "$CAPTURE/ingest-2.body")" = resolved ] || fail "the second event is not resolved"
+  [ "$(event_id_of 1)" != "$(event_id_of 2)" ] || fail "open and resolved share an event id"
+  jq -e '.eventId | test("^backup-failed:test-[0-9]+:(open|resolved)$")' "$CAPTURE/ingest-2.body" >/dev/null \
+    || fail "the test event id has an unexpected form: $(event_id_of 2)"
+  [ "$(jq -r .key "$CAPTURE/ingest-2.body")" = backup-failed ] || fail "the test event is not a backup-failed event"
+}
+
+test_notify_test_ingest_fails_when_the_hub_does_not_confirm() {
+  FAKE_INGEST_CODES="202 500" run_backup notify-test ingest
+  assert_status 1
+  FAKE_INGEST_CODES="500" run_backup notify-test ingest
+  assert_status 1
+  assert_telegram_count 0
+}
+
+test_notify_test_ingest_needs_the_ingest_settings() {
+  NOTIFY_INGEST_SECRET="" run_backup notify-test ingest
+  assert_status 1
+  assert_ingest_count 0
+}
+
+test_notify_test_fallback_sends_a_direct_notice_only() {
+  run_backup notify-test fallback
+  assert_status 0
+  assert_ingest_count 0
+  assert_telegram_count 1
+  [[ "$(direct_notice_text 1)" == *"$DIRECT_NOTICE_PREFIX"* ]] || fail "the test notice lacks the fixed prefix"
+  [[ "$(direct_notice_text 1)" == *"notify-test"* ]] || fail "the test notice is not marked as a test"
+  grep -qF "$TELEGRAM_BOT_TOKEN" "$CAPTURE/telegram-1.args" && fail "the bot token is in curl's arguments"
+  return 0
+}
+
+test_notify_test_fallback_fails_without_telegram() {
+  TELEGRAM_BOT_TOKEN="" run_backup notify-test fallback
+  assert_status 1
+  assert_telegram_count 0
+}
+
+test_notify_test_rejects_a_missing_or_unknown_mode() {
+  run_backup notify-test
+  assert_status 2
+  run_backup notify-test everything
+  assert_status 2
+  assert_output_contains "usage"
+  [ "$(ingest_count)" = 0 ] && [ "$(telegram_count)" = 0 ] || fail "a wrong mode sent something"
 }
 
 # --- schedule ---------------------------------------------------------------

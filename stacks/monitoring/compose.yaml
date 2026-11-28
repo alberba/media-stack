@@ -21,8 +21,6 @@ services:
       SECURITY_AUTO_UPDATE: ${SECURITY_AUTO_UPDATE:-off}
       WUD_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
       WUD_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
     volumes:
       - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/security-monitor:/state
       - /var/run/docker.sock:/var/run/docker.sock:ro
@@ -87,13 +85,7 @@ services:
       WUD_AUTH_ADMIN_USER: ${WUD_ADMIN_USER:-admin}
       WUD_AUTH_ADMIN_PASSWORD: ${WUD_ADMIN_PASSWORD:-}
       WUD_WATCHER_LOCAL_CRON: ${WUD_CRON:-0 5 * * *}
-      # Notify only major version changes, not minor/patch or image rebuilds.
-      # WUD cannot identify security fixes from image tags.
-      WUD_TRIGGER_TELEGRAM_TELEGRAM_THRESHOLD: major-only
-      WUD_TRIGGER_TELEGRAM_TELEGRAM_ONDIGEST: "false"
-      # With these empty, WUD only logs that the trigger is off.
-      WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      WUD_TRIGGER_TELEGRAM_TELEGRAM_CHATID: ${TELEGRAM_CHAT_ID:-}
+      # WUD has no notification trigger: check its status in its UI and in security-monitor.
     ports:
       - 3000:3000
     volumes:

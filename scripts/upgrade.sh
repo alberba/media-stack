@@ -35,20 +35,13 @@ ASSUME=""
 VERIFY_ATTEMPTS="${VERIFY_ATTEMPTS:-24}"
 VERIFY_INTERVAL="${VERIFY_INTERVAL:-5}"
 setting() { python3 scripts/env_contract.py get --file "$ENV_FILE" --name "$1" 2>/dev/null || true; }
-# Unattended runs report to the Operator's Telegram chat when one is configured.
-notify() {
+# Unattended runs leave their notice on the output (and so in the systemd journal);
+# the hub opens the incidents for failures from the deploy snapshot.
+notice() {
   [ "$UNATTENDED" = 1 ] || return 0
-  local token chat
-  token="$(setting TELEGRAM_BOT_TOKEN)"
-  chat="$(setting TELEGRAM_CHAT_ID)"
   echo "notice: $1"
-  [ -n "$token" ] && [ -n "$chat" ] || return 0
-  # The token goes through curl's config on stdin, never through argv.
-  printf 'url = "https://api.telegram.org/bot%s/sendMessage"\n' "$token" |
-    curl -fsS -o /dev/null --max-time 30 -K - --data-urlencode "chat_id=$chat" \
-      --data-urlencode "text=Media Stack — $1" || echo 'warning: Telegram notification failed' >&2
 }
-die() { echo "error: $*" >&2; notify "actualización automática detenida: $*"; exit 1; }
+die() { echo "error: $*" >&2; notice "actualización automática detenida: $*"; exit 1; }
 confirm() {
   local answer
   [ "$UNATTENDED" = 0 ] || return 1
@@ -317,7 +310,7 @@ main() {
       # Report each held release once, not on every daily run.
       if [ "$DRY" = 0 ] && [ "$(cat "$STATE/held" 2>/dev/null)" != "$held" ]; then
         mkdir -p "$STATE"; printf '%s\n' "$held" > "$STATE/held"
-        notify "$held. Requiere actualización manual: sudo scripts/upgrade.sh (docs/upgrading.md)."
+        notice "$held. Requiere actualización manual: sudo scripts/upgrade.sh (docs/upgrading.md)."
       fi
     fi
   fi
@@ -344,9 +337,9 @@ main() {
       echo "Upgrade failed at $release. Recovery: scripts/upgrade.sh --rollback" >&2
       if [ "$UNATTENDED" = 1 ]; then
         if rollback; then
-          notify "falló la actualización a $release; restaurada $BASE (código e imágenes)."
+          notice "falló la actualización a $release; restaurada $BASE (código e imágenes)."
         else
-          notify "falló la actualización a $release y también la vuelta atrás. Revisa: sudo scripts/upgrade.sh --rollback"
+          notice "falló la actualización a $release y también la vuelta atrás. Revisa: sudo scripts/upgrade.sh --rollback"
         fi
         return 1
       fi
@@ -357,6 +350,6 @@ main() {
   done
   rm -f "$STATE/pending" "$STATE/attempted"
   echo "Upgrade verified: $previous. Previous checkout retained for --rollback."
-  notify "actualizado de $BASE a $previous y verificado.${held:+ Pendiente manual: $held.}"
+  notice "actualizado de $BASE a $previous y verificado.${held:+ Pendiente manual: $held.}"
 }
 main "$@"

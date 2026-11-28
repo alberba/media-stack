@@ -4,16 +4,24 @@ Seerr Issue Automator
 Listens for Seerr/Overseerr webhook events (ISSUE_CREATED),
 retrieves the full issue from Seerr API,
 blocklists the faulty release in Radarr/Sonarr, triggers an alternate search,
-handles subtitle searches in Bazarr, and notifies via Telegram.
+handles subtitle searches in Bazarr, and publishes the opening of each issue to the
+hub's notification ingest (ISSUE_RESOLVED publishes its closing). Events are kept in
+an on-disk outbox and retried until the hub confirms them, so a hub outage or a
+restart does not lose a closing. The hub decides whether and how anyone is told;
+this service never talks to Telegram.
 
 Every setting comes from the environment (the Instance's .env); see load_config.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+import re
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -40,8 +48,27 @@ MANAGERS = {
     "tv": ("sonarr", "sonarr_vo", "SEERR_SONARR_VO_SERVER_ID"),
 }
 
+# The hub ingest settings go together: all three or none.
+INGEST_VARS = ("NOTIFY_INGEST_URL", "NOTIFY_INGEST_SECRET", "NOTIFY_INGEST_HOST_ID")
+# Longest text per field the hub's schema accepts.
+INGEST_LIMITS = {"subject": 200, "reportedBy": 100, "problem": 300, "action": 500}
+
+# Outbox: one JSON file per event not yet confirmed by the hub. 14 days stays below
+# the 30 days the hub remembers event ids, so a repeat after a lost 2xx is still a duplicate.
+OUTBOX_MAX_EVENTS = 200
+OUTBOX_MAX_AGE_SECONDS = 14 * 86400
+OUTBOX_BACKOFF_BASE = 15
+OUTBOX_BACKOFF_CAP = 900
+OUTBOX_POLL_SECONDS = 30
+OUTBOX_STATES = ("open", "resolved")
+
 # Set by main() from the environment.
 CONFIG = {}
+
+OUTBOX_LOCK = threading.Lock()
+OUTBOX_DRAIN_LOCK = threading.Lock()
+OUTBOX_WAKE = threading.Event()
+OUTBOX_WORKER = {"thread": None, "stop": None}
 
 
 class ConfigError(Exception):
@@ -77,15 +104,29 @@ def load_config(environ):
             continue
         vo_server_ids[media_type] = int(raw)
 
+    ingest_values = {name: get(name) for name in INGEST_VARS}
+    ingest = None
+    if any(ingest_values.values()):
+        missing = [name for name, value in ingest_values.items() if not value]
+        if missing:
+            errors.append(f"{', '.join(missing)} must be set together with the other NOTIFY_INGEST_* variables")
+        else:
+            ingest = {
+                "url": ingest_values["NOTIFY_INGEST_URL"],
+                "secret": ingest_values["NOTIFY_INGEST_SECRET"],
+                "host_id": ingest_values["NOTIFY_INGEST_HOST_ID"],
+                # Only the tests set OUTBOX_DIR; the Instance mounts its folder on /outbox.
+                "outbox_dir": get("OUTBOX_DIR") or "/outbox",
+            }
+
     if errors:
         raise ConfigError("; ".join(errors))
 
-    token, chat_id = get("TELEGRAM_BOT_TOKEN"), get("TELEGRAM_CHAT_ID")
     return {
         "port": 5056,
         "services": services,
         "vo_server_ids": vo_server_ids,
-        "telegram": {"bot_token": token, "chat_id": chat_id} if token and chat_id else None,
+        "ingest": ingest,
     }
 
 
@@ -131,24 +172,308 @@ def api_request(url, method="GET", headers=None, data=None, timeout=12):
         return {"error": str(e)}, 500
 
 
-def send_telegram(text_html):
-    """Sends a formatted notification to Telegram."""
-    tg_cfg = CONFIG.get("telegram")
-    if not tg_cfg:
-        return
-    token = tg_cfg["bot_token"]
-    chat_id = tg_cfg["chat_id"]
+def sign_ingest(secret, timestamp, body):
+    """HMAC-SHA256 over "<timestamp>.<body>", as the hub's ingest verifies it."""
+    message = str(timestamp).encode("utf-8") + b"." + body
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text_html,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+
+def ingest_body(event):
+    """The exact bytes that get signed and sent: compact JSON, fixed field order."""
+    ordered = {key: event[key] for key in ("v", "source", "eventId", "hostId", "key", "state", "data")}
+    return json.dumps(ordered, separators=(",", ":")).encode("utf-8")
+
+
+def build_issue_event(issue_id, state, data):
+    """One event per issue transition. The body is serialised once, with a stable
+    eventId, so every delivery of it is the same event to the hub."""
+    event_id = f"issue:{issue_id}:{state}"
+    body = ingest_body({
+        "v": 1,
+        "source": "issue-automator",
+        "eventId": event_id,
+        "hostId": CONFIG["ingest"]["host_id"],
+        "key": f"issue:seerr:{issue_id}",
+        "state": state,
+        "data": data,
+    })
+    return {"issue_id": issue_id, "state": state, "event_id": event_id, "body": body}
+
+
+def deliver_issue_event(event):
+    """One signed attempt to deliver an event. True only when the hub answers 2xx.
+    Nothing from the request (secret, body) is ever logged here."""
+    ingest = CONFIG["ingest"]
+    timestamp = int(time.time())
+    signature = sign_ingest(ingest["secret"], timestamp, event["body"])
+    headers = {
+        "Content-Type": "application/json",
+        "X-Ingest-Timestamp": str(timestamp),
+        "X-Ingest-Signature": f"v1={signature}",
     }
-    res, status = api_request(url, method="POST", data=payload)
-    if status != 200:
-        logging.warning(f"Failed to send Telegram message: {res}")
+    try:
+        _, status = api_request(ingest["url"], method="POST", headers=headers, data=event["body"])
+    except Exception as e:
+        # Only the exception type: its text could carry request details.
+        logging.error(f"Delivery of {event['event_id']} failed unexpectedly: {type(e).__name__}")
+        return False
+    return 200 <= status < 300
+
+
+def outbox_dir():
+    ingest = CONFIG.get("ingest")
+    return ingest["outbox_dir"] if ingest else None
+
+
+def outbox_write(path, record):
+    """Atomic: a temporary file next to the target, then a rename, so a crash leaves
+    either the old record or the new one."""
+    temporary = path[: -len(".json")] + ".tmp"
+    with open(temporary, "w", encoding="utf-8") as handle:
+        handle.write(json.dumps(record))
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.replace(temporary, path)
+
+
+def outbox_remove(path):
+    try:
+        os.remove(path)
+    except FileNotFoundError:
+        pass
+
+
+def outbox_names(directory):
+    """File names of the pending events, oldest first."""
+    try:
+        return sorted(name for name in os.listdir(directory) if name.endswith(".json"))
+    except OSError:
+        return []
+
+
+def outbox_enqueue(event, now=None):
+    """Stores the event on disk for the drain to deliver. True when it is in the outbox
+    (also when it already was), False when it could not be written."""
+    directory = outbox_dir()
+    issue_id = numeric_issue_id(event.get("issue_id"))
+    state = event.get("state")
+    if not directory or not issue_id or state not in OUTBOX_STATES:
+        logging.error("Event not queued: no outbox, or an invalid issue id or state")
+        return False
+    now = time.time() if now is None else now
+    event_id = event["event_id"]
+    record = {
+        "v": 1,
+        "event_id": event_id,
+        "issue_id": issue_id,
+        "state": state,
+        "body": event["body"].decode("ascii"),
+        "created_at": now,
+        "attempts": 0,
+        "next_attempt": now,
+    }
+    try:
+        with OUTBOX_LOCK:
+            names = outbox_names(directory)
+            if any(name.endswith(f"-{issue_id}-{state}.json") for name in names):
+                return True
+            while len(names) >= OUTBOX_MAX_EVENTS:
+                oldest = names.pop(0)
+                outbox_remove(os.path.join(directory, oldest))
+                logging.error(f"Outbox full: dropped the oldest event {outbox_event_id(oldest)}")
+            name = f"{int(now * 1000):013d}-{issue_id}-{state}.json"
+            outbox_write(os.path.join(directory, name), record)
+    except OSError as e:
+        # Only the exception type: nothing from the event is logged.
+        logging.error(f"Could not queue {event_id}: {type(e).__name__}")
+        return False
+    OUTBOX_WAKE.set()
+    return True
+
+
+def outbox_event_id(name):
+    """The event id a file name stands for: <ms>-<issue>-<state>.json."""
+    _, issue_id, state = name[: -len(".json")].split("-", 2)
+    return f"issue:{issue_id}:{state}"
+
+
+def outbox_pending():
+    """(path, record) of every pending event, oldest first."""
+    directory = outbox_dir()
+    pending = []
+    for name in outbox_names(directory) if directory else []:
+        path = os.path.join(directory, name)
+        try:
+            with open(path, encoding="utf-8") as handle:
+                record = json.load(handle)
+        except (FileNotFoundError, PermissionError):
+            continue
+        except (OSError, ValueError):
+            record = None
+        if not valid_record(record):
+            quarantine(path, name)
+            continue
+        pending.append((path, record))
+    return pending
+
+
+def valid_record(record):
+    if not isinstance(record, dict) or record.get("v") != 1:
+        return False
+    number = lambda value: isinstance(value, (int, float)) and not isinstance(value, bool)
+    issue_id = numeric_issue_id(record.get("issue_id"))
+    return (
+        issue_id is not None
+        and record.get("state") in OUTBOX_STATES
+        and record.get("event_id") == f"issue:{issue_id}:{record.get('state')}"
+        and isinstance(record.get("body"), str)
+        and number(record.get("created_at"))
+        and isinstance(record.get("attempts"), int) and not isinstance(record.get("attempts"), bool)
+        and number(record.get("next_attempt"))
+    )
+
+
+def quarantine(path, name):
+    """Sets an unreadable record aside, once, so it never blocks the rest."""
+    try:
+        os.replace(path, path + ".corrupt")
+        logging.error(f"Outbox file {name} is not a valid event: set aside as .corrupt")
+    except OSError as e:
+        logging.error(f"Outbox file {name} is not a valid event and could not be set aside: {type(e).__name__}")
+
+
+def check_outbox(path):
+    """Creates the outbox folder if needed and proves it is writable, or raises
+    ConfigError: without it events would be lost silently. Also sweeps the temporary
+    files an interrupted write left behind."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".write-check.tmp")
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("")
+        for name in os.listdir(path):
+            if name.endswith(".tmp"):
+                outbox_remove(os.path.join(path, name))
+    except OSError as e:
+        raise ConfigError(
+            f"the outbox folder {path} is not writable ({type(e).__name__}); "
+            "run scripts/init.sh to create it for the extras Profile"
+        )
+
+
+def outbox_sweep_corrupt(directory, now):
+    """Deletes the .corrupt files nobody looked at within the time events are kept."""
+    try:
+        names = [name for name in os.listdir(directory) if name.endswith(".corrupt")]
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            if now - os.path.getmtime(path) > OUTBOX_MAX_AGE_SECONDS:
+                outbox_remove(path)
+        except OSError:
+            continue
+
+
+def outbox_drain(now=None):
+    """Delivers what is due. A file goes away only when the hub answers 2xx; a failure
+    keeps it and schedules the next attempt. Returns the counts of this pass."""
+    now = time.time() if now is None else now
+    counts = {"delivered": 0, "failed": 0, "dropped": 0, "pending": 0}
+    with OUTBOX_DRAIN_LOCK:
+        if not CONFIG.get("ingest"):
+            return counts
+        outbox_sweep_corrupt(outbox_dir(), now)
+        # Issues with an event ahead that is not confirmed: their later events wait.
+        blocked = set()
+        for path, record in outbox_pending():
+            event_id = record["event_id"]
+            if now - record["created_at"] > OUTBOX_MAX_AGE_SECONDS:
+                outbox_remove(path)
+                counts["dropped"] += 1
+                logging.error(f"Dropped {event_id}: older than the outbox keeps events")
+                continue
+            if record["issue_id"] in blocked or record["next_attempt"] > now:
+                blocked.add(record["issue_id"])
+                continue
+            event = {
+                "issue_id": record["issue_id"],
+                "state": record["state"],
+                "event_id": event_id,
+                "body": record["body"].encode("ascii"),
+            }
+            if deliver_issue_event(event):
+                outbox_remove(path)
+                counts["delivered"] += 1
+                logging.info(f"Published {event_id} to the hub")
+                continue
+            record["attempts"] += 1
+            delay = min(OUTBOX_BACKOFF_CAP, OUTBOX_BACKOFF_BASE * 2 ** min(record["attempts"] - 1, 20))
+            record["next_attempt"] = now + delay
+            blocked.add(record["issue_id"])
+            counts["failed"] += 1
+            try:
+                outbox_write(path, record)
+            except OSError as e:
+                logging.error(f"Could not record the attempt for {event_id}: {type(e).__name__}")
+                continue
+            logging.error(f"Could not deliver {event_id} (attempt {record['attempts']}); retrying in {delay}s")
+        counts["pending"] = len(outbox_names(outbox_dir()))
+    return counts
+
+
+def outbox_loop(stop):
+    while not stop.is_set():
+        try:
+            outbox_drain()
+        except Exception as e:
+            logging.error(f"Outbox drain failed: {type(e).__name__}")
+        OUTBOX_WAKE.wait(OUTBOX_POLL_SECONDS)
+        OUTBOX_WAKE.clear()
+
+
+def start_outbox_worker():
+    """Starts the thread that delivers the outbox: now, on every new event, and every poll."""
+    stop_outbox_worker()
+    stop = threading.Event()
+    thread = threading.Thread(target=outbox_loop, args=(stop,), name="outbox", daemon=True)
+    OUTBOX_WORKER.update(thread=thread, stop=stop)
+    thread.start()
+
+
+def stop_outbox_worker():
+    thread, stop = OUTBOX_WORKER["thread"], OUTBOX_WORKER["stop"]
+    if thread is None:
+        return
+    stop.set()
+    OUTBOX_WAKE.set()
+    thread.join(timeout=15)
+    OUTBOX_WORKER.update(thread=None, stop=None)
+
+
+def publish_issue_event(issue_id, state, data):
+    """Builds the event for an issue transition and queues it; True when it is in the outbox."""
+    if not CONFIG.get("ingest"):
+        logging.warning(f"Issue #{issue_id} {state} not published: NOTIFY_INGEST_* is not set")
+        return False
+    event = build_issue_event(issue_id, state, data)
+    if outbox_enqueue(event):
+        logging.info(f"Queued {event['event_id']} for the hub")
+        return True
+    return False
+
+
+def numeric_issue_id(value):
+    """The issue id as a string of 1-9 digits (what the hub's key accepts), else None."""
+    text = str(value) if isinstance(value, (int, str)) and not isinstance(value, bool) else ""
+    return text if re.fullmatch(r"[0-9]{1,9}", text) else None
+
+
+def plain_text(value, limit):
+    """Text the hub composes as plain text: markup removed, whitespace collapsed, capped."""
+    text = re.sub(r"<[^>]*>", "", str(value))
+    return " ".join(text.split())[:limit]
 
 
 def get_seerr_issue(issue_id):
@@ -309,14 +634,28 @@ def process_webhook_payload(payload):
     notif_type = payload.get("notification_type") or payload.get("event")
     logging.info(f"Received webhook event: {notif_type}")
 
-    # Handle test webhooks
+    # Seerr's connection test and our own /test do nothing beyond answering.
     if notif_type in ("TEST_NOTIFICATION", "test"):
-        send_telegram("🧪 <b>Test de conexión recibido</b>\n\nEl servicio Issue-Automator está conectado con éxito a Seerr.")
         return {"status": "ok", "detail": "Test notification handled"}
 
     # Extract issue ID from webhook
     issue_data = payload.get("issue", {})
     issue_id = issue_data.get("id") or issue_data.get("issue_id") or payload.get("issue_id")
+
+    # A resolution only closes the incident in the hub: it must never run the
+    # blocklist, the search or the Bazarr request again.
+    if notif_type == "ISSUE_RESOLVED":
+        event_issue_id = numeric_issue_id(issue_id)
+        if not event_issue_id:
+            logging.error("Resolved issue has no numeric id: nothing published to the hub")
+            return {"status": "ok", "detail": "Resolved issue without a numeric id", "queued": False}
+        queued = publish_issue_event(event_issue_id, "resolved", {})
+        return {"status": "ok", "detail": "Issue resolved", "queued": queued}
+
+    # Comments, reopenings and anything else Seerr may send are not ours to act on.
+    if notif_type and notif_type != "ISSUE_CREATED":
+        logging.info(f"Ignoring notification type {notif_type}")
+        return {"status": "ignored", "detail": f"Notification type {notif_type} is not handled"}
 
     # If we have an issue_id, query Seerr directly for the complete authoritative data
     full_issue = None
@@ -400,17 +739,20 @@ def process_webhook_payload(payload):
     comment_text = f"🤖 [Auto-Responder]\nIncidencia procesada: {issue_type_name}.\n{clean_detail}"
     comment_seerr_issue(issue_id, comment_text)
 
-    # Send Telegram notification
-    tg_text = (
-        f"🚨 <b>Incidencia reportada en Seerr</b>\n\n"
-        f"🎬 <b>Título:</b> {subject}\n"
-        f"👤 <b>Reportado por:</b> {user_name}\n"
-        f"⚠️ <b>Problema:</b> {issue_type_name} ({issue_msg})\n\n"
-        f"⚙️ <b>Acción automática:</b>\n{action_detail}"
-    )
-    send_telegram(tg_text)
+    # Queue the opening for the hub; it decides who gets told.
+    queued = False
+    event_issue_id = numeric_issue_id(issue_id)
+    if event_issue_id:
+        queued = publish_issue_event(event_issue_id, "open", {
+            "subject": plain_text(subject, INGEST_LIMITS["subject"]),
+            "reportedBy": plain_text(user_name, INGEST_LIMITS["reportedBy"]),
+            "problem": plain_text(f"{issue_type_name} ({issue_msg})", INGEST_LIMITS["problem"]),
+            "action": plain_text(action_detail, INGEST_LIMITS["action"]),
+        })
+    else:
+        logging.error("Issue has no numeric id: nothing published to the hub")
 
-    return {"status": "success", "action_success": action_success, "detail": action_detail}
+    return {"status": "success", "action_success": action_success, "detail": action_detail, "queued": queued}
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -422,7 +764,9 @@ class WebhookHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         if self.path in ("/health", "/"):
             self._set_headers(200)
-            self.wfile.write(json.dumps({"status": "healthy", "service": "seerr-issue-automator"}).encode("utf-8"))
+            pending = len(outbox_names(outbox_dir())) if CONFIG.get("ingest") else 0
+            self.wfile.write(json.dumps(
+                {"status": "healthy", "service": "seerr-issue-automator", "pending": pending}).encode("utf-8"))
         else:
             self._set_headers(404)
             self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
@@ -443,9 +787,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode("utf-8"))
 
         elif self.path in ("/test", "/test/"):
-            send_telegram("🧪 <b>Test manual de Issue Automator</b>\n\nEl microservicio está activo y el bot de Telegram responde correctamente.")
             self._set_headers(200)
-            self.wfile.write(json.dumps({"status": "test sent to Telegram"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "ingest_configured": bool(CONFIG.get("ingest"))}).encode("utf-8"))
         else:
             self._set_headers(404)
             self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
@@ -473,6 +816,15 @@ def main():
     except ConfigError as e:
         logging.error(f"Invalid configuration, set these in .env: {e}")
         sys.exit(1)
+    if CONFIG["ingest"]:
+        try:
+            check_outbox(CONFIG["ingest"]["outbox_dir"])
+        except ConfigError as e:
+            logging.error(f"Cannot start: {e}")
+            sys.exit(1)
+        start_outbox_worker()
+    else:
+        logging.warning("NOTIFY_INGEST_* is not set: issues are handled but no notices are published")
     run_server()
 
 

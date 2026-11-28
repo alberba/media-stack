@@ -4,14 +4,17 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export SECURITY_TEST_REPO="$REPO"
 PYTHONPATH="$REPO/stacks/monitoring/security-monitor" python3 -B - <<'PY'
+import contextlib
 import copy
 import datetime
 import fcntl
+import io
 import json
 import os
 from pathlib import Path
 import tempfile
 import unittest
+import urllib.request
 from unittest.mock import patch
 import uuid
 import updater
@@ -36,14 +39,13 @@ class Policy(unittest.TestCase):
         self.assertIn(str(apps / '.env'), args)
         self.assertEqual(args[args.index('--scope') + 1], 'apps-server')
 
-    def test_unclassified_change_stays_manual_without_notification(self):
+    def test_unclassified_change_stays_manual(self):
         p = dict(plan(), semver_diff='unknown')
-        reason = updater.manual_reason(p)
-        self.assertEqual(reason, 'unclassified version change')
-        self.assertFalse(updater.notify_outcome('manual: ' + reason))
-        self.assertTrue(updater.notify_outcome('updated'))
-        self.assertTrue(updater.notify_outcome('manual: major version: manual review'))
-        self.assertTrue(updater.notify_outcome('rollback: failed healthcheck'))
+        self.assertEqual(updater.manual_reason(p), 'unclassified version change')
+
+    def test_the_updater_has_no_notification_path(self):
+        for name in ('notify', 'flush_notifications', 'notify_outcome'):
+            self.assertFalse(hasattr(updater, name), name)
 
     def test_verified_nonmajor_security_update_is_eligible(self):
         self.assertIsNone(updater.manual_reason(plan()))
@@ -97,6 +99,83 @@ class Policy(unittest.TestCase):
                     with self.assertRaises(BlockingIOError):
                         host.apply('app', plan())
                 apply.assert_not_called()
+
+
+class Run(unittest.TestCase):
+    """updater.run with a stand-in Host: results decide the exit code and nothing is sent."""
+
+    def execute(self, result=None, *, pending=None):
+        calls = []
+        with tempfile.TemporaryDirectory() as directory, contextlib.redirect_stdout(io.StringIO()) as output:
+            repo = Path(directory) / 'repo'
+            repo.mkdir()
+            appdata = Path(directory) / 'appdata'
+            state = appdata / 'security-monitor'
+            (state / 'comparisons').mkdir(parents=True)
+            transaction = {'id': 'tx1', 'service': 'app'}
+            if pending:
+                (state / 'active-update.json').write_text(json.dumps(transaction))
+            else:
+                p = dict(plan(), names=['app'], local_id='sha256:' + '1' * 64)
+                (state / 'comparisons' / 'app.json').write_text(json.dumps(p))
+            settings = {'SECURITY_AUTO_UPDATE': 'on', 'MONITOR_NAME': 'Test', 'APPDATA_ROOT': str(appdata)}
+
+            class FakeHost:
+                def __init__(self, repo, state, appdata):
+                    self.pending = state / 'active-update.json'
+                    self.transactions = state / 'transactions'
+                    self.transactions.mkdir()
+                def inspect(self, name):
+                    return {'Image': 'sha256:' + '1' * 64, 'Config': {'Labels': {
+                        'com.docker.compose.service': 'app',
+                        'com.docker.compose.project.working_dir': str(repo)}}}
+                def eligibility(self, service, plan):
+                    return None
+                def apply(self, service, plan):
+                    if result.startswith('raise'):
+                        raise RuntimeError('boom')
+                    return result
+                def rollback(self, transaction):
+                    calls.append(('rollback', transaction['service']))
+                    self.pending.unlink()
+
+            env = {'TELEGRAM_BOT_TOKEN': 'token', 'TELEGRAM_CHAT_ID': '1'}
+            with patch.dict(os.environ, env), \
+                    patch.object(urllib.request, 'urlopen', side_effect=AssertionError('network')) as network, \
+                    patch.object(updater, 'command', side_effect=AssertionError('command')) as command, \
+                    patch.object(updater, 'setting', side_effect=lambda repo, name: settings[name]), \
+                    patch.object(updater, 'Host', FakeHost):
+                code = updater.run(repo, scan=False)
+            network.assert_not_called()
+            command.assert_not_called()
+            self.assertEqual([path.name for path in state.glob('*notifications*')], [])
+        return code, output.getvalue(), calls
+
+    def test_an_applied_update_exits_zero_and_prints_its_result(self):
+        code, output, _ = self.execute('updated: verified')
+        self.assertEqual(code, 0)
+        self.assertIn('updated: verified', output)
+
+    def test_a_rollback_exits_one_and_prints_its_result(self):
+        code, output, _ = self.execute('rollback: failed healthcheck')
+        self.assertEqual(code, 1)
+        self.assertIn('rollback: failed healthcheck', output)
+
+    def test_an_error_exits_one_and_prints_its_result(self):
+        code, output, _ = self.execute('ERROR: update failed')
+        self.assertEqual(code, 1)
+        self.assertIn('ERROR: update failed', output)
+
+    def test_a_manual_result_exits_zero(self):
+        code, output, _ = self.execute('manual: unclassified version change')
+        self.assertEqual(code, 0)
+        self.assertIn('manual: unclassified version change', output)
+
+    def test_a_pending_update_is_rolled_back_and_the_recovery_stays_on_the_output(self):
+        code, output, calls = self.execute(pending=True)
+        self.assertEqual(code, 0)
+        self.assertEqual(calls, [('rollback', 'app')])
+        self.assertIn('app', output)
 
 
 class ComposeTransactions(unittest.TestCase):

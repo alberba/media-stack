@@ -15,8 +15,11 @@ download again from what the App data remembers.
   on Google Drive (the free 15 GB are plenty) through [rclone](https://rclone.org).
 - **When**: every night at 04:00 (`BACKUP_SCHEDULE`, in `TZ`). Keeps 7 daily, 4 weekly
   and 6 monthly snapshots and prunes the rest.
-- **Alerts**: a Telegram message when a run fails, and the `backup` container turns
-  unhealthy until the next run succeeds.
+- **Alerts**: a failed run is published to the hub as a signed event (up to three
+  attempts over about two minutes) and the hub decides how to alert you; only when none
+  gets a 2xx is a direct Telegram notice sent, with a fixed prefix, the host and the
+  time. A successful run sends nothing. The `backup` container also turns unhealthy
+  until the next run succeeds. Details in [Failed backup alerts](#failed-backup-alerts).
 
 ## What to keep in your password manager
 
@@ -44,7 +47,10 @@ In `.env`:
 ```sh
 COMPOSE_PROFILES=backup          # or e.g. "vo,backup"
 RESTIC_PASSWORD=...              # generate one: openssl rand -base64 32
-TELEGRAM_BOT_TOKEN=...           # optional: reuse the bot you already have for alerts
+NOTIFY_INGEST_URL=...            # full URL of the hub ingest, reachable from the container
+NOTIFY_INGEST_SECRET=...         # the same NOTIFY_INGEST_SECRET as in the hub's .env
+NOTIFY_INGEST_HOST_ID=nas-home   # this host's id in the hub
+TELEGRAM_BOT_TOKEN=...           # optional: last resort when the hub does not confirm
 TELEGRAM_CHAT_ID=...
 ```
 
@@ -98,10 +104,36 @@ BACKUP_EXCLUDE=.git,some/big/folder     # anything else you do not need back
 Only the `backup` service has to run: `docker compose up -d --build backup`. The Core
 variables in `.env` still need values, because Compose reads the whole file.
 
+## Failed backup alerts
+
+When a run fails, `media-backup` publishes a signed `backup-failed` event (HMAC-SHA256)
+to `NOTIFY_INGEST_URL`. The hub turns it into an incident and alerts you according to
+its policy.
+
+- **Attempts**: up to three, with the same `eventId`, over about two minutes
+  (`INGEST_RETRY_DELAYS`, default `0 30 60` seconds). Only a 2xx counts as confirmation;
+  any other code, or a network failure, moves on to the next attempt.
+- **Last resort**: if no attempt gets a 2xx, or the ingest is not configured (all three
+  `NOTIFY_INGEST_*` variables are needed), the backup sends one direct Telegram notice
+  with `TELEGRAM_BOT_TOKEN` and `TELEGRAM_CHAT_ID`. It starts with a fixed prefix that
+  tells it apart from the hub's alerts and carries the host, the time and the errors. It
+  is the only direct notice left in the Template and exists for `backup-failed` only.
+- **A successful run sends nothing**: neither to the hub nor to Telegram.
+- **Known duplicate**: if the hub was down or confirmed late, the direct notice arrives
+  and, when the hub is back, it may also open the incident for the same failure. This is
+  accepted behaviour, not a defect.
+
+Check each path without waiting for a real failure:
+
+```sh
+docker compose exec backup media-backup notify-test ingest     # opens and closes a test incident in the hub
+docker compose exec backup media-backup notify-test fallback   # sends a test direct notice on Telegram
+```
+
 ## Checking it
 
-- `docker compose ps backup`: `healthy` unless the last run failed. Telegram only hears
-  about runs that fail; if the container is stopped nothing runs and nothing is sent, so
+- `docker compose ps backup`: `healthy` unless the last run failed. Alerts only come
+  from runs that fail; if the container is stopped nothing runs and nothing is sent, so
   let your monitoring watch its health too.
 - `docker compose logs backup`: the output of every run.
 - `docker compose exec backup restic snapshots`: every snapshot kept.

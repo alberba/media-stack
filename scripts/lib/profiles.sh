@@ -57,7 +57,7 @@ declare -A PROFILE_DIRS=(
   [monitoring]=$'app beszel/data\napp beszel/socket\napp beszel/agent\napp wud\nroot security-monitor'
   [proxy]=$'private npm/data\nprivate npm/letsencrypt'
   [remote]="private tailscale"
-  [extras]=$'app mousehole\napp filebrowser/config\napp filebrowser/database'
+  [extras]=$'app mousehole\napp filebrowser/config\napp filebrowser/database\napp issue-automator'
   [transcode]=$'app tdarr/server\napp tdarr/configs\napp tdarr/logs\napp tdarr/cache'
 )
 

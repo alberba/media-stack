@@ -215,7 +215,13 @@ test_issue_automator_is_built_locally_with_no_config_file() {
   local json
   json="$(all_profiles_json)"
   query '"build" in s["issue-automator"]' <<< "$json" | grep -q true || fail "issue-automator is not built locally"
-  [ "$(query 's["issue-automator"].get("volumes", [])' <<< "$json")" = "[]" ] || fail "issue-automator mounts files"
+  [ "$(query '[m["target"] for m in s["issue-automator"]["volumes"]]' <<< "$json")" = '["/outbox"]' ] \
+    || fail "issue-automator mounts something other than its outbox"
+  [ "$(query 's["issue-automator"]["volumes"][0]["source"]' <<< "$json")" = "/opt/media-stack/appdata/issue-automator" ] \
+    || fail "the outbox is not the issue-automator folder under APPDATA_ROOT"
+  local owner
+  owner="$(sed -n 's/^PUID=//p' "$SANDBOX/.env"):$(sed -n 's/^PGID=//p' "$SANDBOX/.env")"
+  [ "$(query 's["issue-automator"]["user"]' <<< "$json")" = "$owner" ] || fail "issue-automator does not run as PUID:PGID"
   [ "$(query 's["issue-automator"]["environment"]["SEERR_API_KEY"]' <<< "$json")" = dummy ] || fail "issue-automator does not take SEERR_API_KEY from .env"
 }
 
@@ -226,14 +232,14 @@ test_instance_specific_values_come_from_the_env() {
   [ "$(query 's["mousehole"]["environment"]["MOUSEHOLE_ALLOWED_HOSTS"]' <<< "$json")" = dummy ] || fail "mousehole allowed host does not come from .env"
   [ "$(query 's["homarr"]["environment"]["SECRET_ENCRYPTION_KEY"]' <<< "$json")" = dummy ] || fail "homarr key does not come from .env"
   [ "$(query 's["wud"]["environment"]["WUD_AUTH_ADMIN_PASSWORD"]' <<< "$json")" = dummy ] || fail "WUD login does not come from .env"
-  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_BOTTOKEN"]' <<< "$json")" = dummy ] || fail "WUD alerts do not use TELEGRAM_BOT_TOKEN"
 }
 
-test_wud_telegram_only_notifies_major_versions() {
+test_no_service_but_backup_gets_telegram_credentials() {
   local json
   json="$(all_profiles_json)"
-  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_THRESHOLD"]' <<< "$json")" = major-only ] || fail "WUD Telegram does not filter minor/patch updates"
-  [ "$(query 's["wud"]["environment"]["WUD_TRIGGER_TELEGRAM_TELEGRAM_ONDIGEST"]' <<< "$json")" = false ] || fail "WUD Telegram notifies image rebuilds"
+  [ "$(query 'sorted(n for n, v in s.items() if {"TELEGRAM_BOT_TOKEN", "TELEGRAM_CHAT_ID"} & set(v.get("environment", {})))' <<< "$json")" = '["backup"]' ] \
+    || fail "a service other than backup receives the Telegram credentials"
+  [ "$(query '[k for k in s["wud"]["environment"] if k.startswith("WUD_TRIGGER_")]' <<< "$json")" = "[]" ] || fail "WUD has a notification trigger"
 }
 
 test_tailscale_state_is_kept_in_the_app_data() {

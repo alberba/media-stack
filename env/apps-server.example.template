@@ -13,8 +13,6 @@ WUD_CRON=@
 SECURITY_SCAN_CRON=@
 # scripts/security-update.sh --apps-server install enables the host timer.
 SECURITY_AUTO_UPDATE=@
-TELEGRAM_BOT_TOKEN=@
-TELEGRAM_CHAT_ID=@
 
-# Name used in security notifications to distinguish hosts.
+# Name that labels this host in the updaters' output and logs.
 MONITOR_NAME=@
