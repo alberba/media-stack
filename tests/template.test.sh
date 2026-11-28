@@ -215,7 +215,13 @@ test_issue_automator_is_built_locally_with_no_config_file() {
   local json
   json="$(all_profiles_json)"
   query '"build" in s["issue-automator"]' <<< "$json" | grep -q true || fail "issue-automator is not built locally"
-  [ "$(query 's["issue-automator"].get("volumes", [])' <<< "$json")" = "[]" ] || fail "issue-automator mounts files"
+  [ "$(query '[m["target"] for m in s["issue-automator"]["volumes"]]' <<< "$json")" = '["/outbox"]' ] \
+    || fail "issue-automator mounts something other than its outbox"
+  [ "$(query 's["issue-automator"]["volumes"][0]["source"]' <<< "$json")" = "/opt/media-stack/appdata/issue-automator" ] \
+    || fail "the outbox is not the issue-automator folder under APPDATA_ROOT"
+  local owner
+  owner="$(sed -n 's/^PUID=//p' "$SANDBOX/.env"):$(sed -n 's/^PGID=//p' "$SANDBOX/.env")"
+  [ "$(query 's["issue-automator"]["user"]' <<< "$json")" = "$owner" ] || fail "issue-automator does not run as PUID:PGID"
   [ "$(query 's["issue-automator"]["environment"]["SEERR_API_KEY"]' <<< "$json")" = dummy ] || fail "issue-automator does not take SEERR_API_KEY from .env"
 }
 

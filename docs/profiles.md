@@ -228,8 +228,8 @@ Small services the author's Instance uses, turned on together.
 
 - **issue-automator** (port 5056): when a Viewer reports an issue in Seerr, it
   blocklists the release in Radarr/Sonarr and searches for another (video and audio
-  issues), asks Bazarr for subtitles (subtitle issues) and comments on the issue. It no
-  longer sends Telegram messages: it publishes the opening of the issue, and its
+  issues), asks Bazarr for subtitles (subtitle issues) and comments on the issue. It
+  sends no messages of its own: it publishes the opening of the issue, and its
   resolution, to the hub's notification ingest, and the hub decides who is told and
   edits the message instead of duplicating it. Its Seerr comments are in Spanish.
   1. It uses `SEERR_API_KEY`, `RADARR_API_KEY`, `SONARR_API_KEY` and `BAZARR_API_KEY`,
@@ -248,8 +248,17 @@ Small services the author's Instance uses, turned on together.
      default JSON payload. Other types are ignored.
 
   It checks its settings when it starts and stops with a message naming what is missing.
-  The backup's last-resort Telegram notice (docs/backup.md) and the hub's notices leave
-  by their own paths.
+  The backup's last-resort notice (docs/backup.md) and the hub's notices leave by their
+  own paths.
+
+  Every opening and closing is first saved in `<APPDATA_ROOT>/issue-automator` (mounted
+  at `/outbox`, one small file per event) and delivered from there, so Seerr is answered
+  at once and nothing depends on the hub being up. It retries with growing waits (15
+  seconds, doubling, up to 15 minutes) until the hub confirms the event, and a hub outage
+  or a restart does not lose it. It gives up on an event older than 14 days, or beyond
+  the newest 200 pending. `curl http://localhost:5056/health` shows `pending`, the number
+  of events still waiting. `scripts/init.sh` creates the folder with the `extras`
+  Profile; if the service cannot write to it, it does not start and says which folder.
 - **mousehole** (`http://<host>:5010`): keeps MyAnonamouse's record of your seedbox IP
   up to date. It runs behind the VPN, so the IP it reports is the VPN's. Set
   `MOUSEHOLE_AUTH_PASSWORD`, and `MOUSEHOLE_ALLOWED_HOSTS` to the address you open it at

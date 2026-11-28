@@ -11,6 +11,9 @@ services:
     container_name: issue-automator
     profiles: [extras]
     restart: unless-stopped
+    # Keeps the events the hub has not confirmed yet, so a restart does not lose them;
+    # the folder belongs to the Instance's user.
+    user: ${PUID:?set PUID in .env}:${PGID:?set PGID in .env}
     environment:
       TZ: ${TZ:?set TZ in .env}
       SEERR_URL: ${SEERR_URL:-http://seerr:5055}
@@ -34,6 +37,8 @@ services:
       NOTIFY_INGEST_HOST_ID: ${NOTIFY_INGEST_HOST_ID:-nas-home}
     ports:
       - 5056:5056
+    volumes:
+      - ${APPDATA_ROOT:?set APPDATA_ROOT in .env}/issue-automator:/outbox
     networks:
       - media
 

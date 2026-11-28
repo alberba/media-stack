@@ -68,6 +68,10 @@ test_vo_folders_belong_to_the_instance_user() {
   [ "$(profile_dirs vo)" = $'app radarr-vo\napp sonarr-vo' ] || fail "got: $(profile_dirs vo)"
 }
 
+test_extras_keeps_the_issue_automator_outbox_for_the_instance_user() {
+  profile_dirs extras | grep -qx "app issue-automator" || fail "got: $(profile_dirs extras)"
+}
+
 test_remote_keeps_the_tailscale_state_private_to_root() {
   [ "$(profile_dirs remote)" = "private tailscale" ] || fail "got: $(profile_dirs remote)"
 }
