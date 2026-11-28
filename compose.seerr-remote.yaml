@@ -2,7 +2,7 @@
 # Put the security updater's images.compose.json LAST in COMPOSE_FILE.
 services:
   seerr:
-    image: nginx:1.31.9-alpine
+    image: nginx:1.31.10-alpine
     environment: !override
       SEERR_REMOTE_URL: ${SEERR_REMOTE_URL:?set SEERR_REMOTE_URL in .env}
       NGINX_ENVSUBST_FILTER: SEERR_REMOTE_URL
