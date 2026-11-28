@@ -4,16 +4,22 @@ Seerr Issue Automator
 Listens for Seerr/Overseerr webhook events (ISSUE_CREATED),
 retrieves the full issue from Seerr API,
 blocklists the faulty release in Radarr/Sonarr, triggers an alternate search,
-handles subtitle searches in Bazarr, and notifies via Telegram.
+handles subtitle searches in Bazarr, and publishes the opening of each issue to the
+hub's notification ingest (ISSUE_RESOLVED publishes its closing). The hub decides
+whether and how anyone is told; this service never talks to Telegram.
 
 Every setting comes from the environment (the Instance's .env); see load_config.
 """
 
+import hashlib
+import hmac
 import json
 import logging
 import os
+import re
 import sys
 import threading
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -39,6 +45,11 @@ MANAGERS = {
     "movie": ("radarr", "radarr_vo", "SEERR_RADARR_VO_SERVER_ID"),
     "tv": ("sonarr", "sonarr_vo", "SEERR_SONARR_VO_SERVER_ID"),
 }
+
+# The hub ingest settings go together: all three or none.
+INGEST_VARS = ("NOTIFY_INGEST_URL", "NOTIFY_INGEST_SECRET", "NOTIFY_INGEST_HOST_ID")
+# Longest text per field the hub's schema accepts.
+INGEST_LIMITS = {"subject": 200, "reportedBy": 100, "problem": 300, "action": 500}
 
 # Set by main() from the environment.
 CONFIG = {}
@@ -77,15 +88,27 @@ def load_config(environ):
             continue
         vo_server_ids[media_type] = int(raw)
 
+    ingest_values = {name: get(name) for name in INGEST_VARS}
+    ingest = None
+    if any(ingest_values.values()):
+        missing = [name for name, value in ingest_values.items() if not value]
+        if missing:
+            errors.append(f"{', '.join(missing)} must be set together with the other NOTIFY_INGEST_* variables")
+        else:
+            ingest = {
+                "url": ingest_values["NOTIFY_INGEST_URL"],
+                "secret": ingest_values["NOTIFY_INGEST_SECRET"],
+                "host_id": ingest_values["NOTIFY_INGEST_HOST_ID"],
+            }
+
     if errors:
         raise ConfigError("; ".join(errors))
 
-    token, chat_id = get("TELEGRAM_BOT_TOKEN"), get("TELEGRAM_CHAT_ID")
     return {
         "port": 5056,
         "services": services,
         "vo_server_ids": vo_server_ids,
-        "telegram": {"bot_token": token, "chat_id": chat_id} if token and chat_id else None,
+        "ingest": ingest,
     }
 
 
@@ -131,24 +154,72 @@ def api_request(url, method="GET", headers=None, data=None, timeout=12):
         return {"error": str(e)}, 500
 
 
-def send_telegram(text_html):
-    """Sends a formatted notification to Telegram."""
-    tg_cfg = CONFIG.get("telegram")
-    if not tg_cfg:
-        return
-    token = tg_cfg["bot_token"]
-    chat_id = tg_cfg["chat_id"]
+def sign_ingest(secret, timestamp, body):
+    """HMAC-SHA256 over "<timestamp>.<body>", as the hub's ingest verifies it."""
+    message = str(timestamp).encode("utf-8") + b"." + body
+    return hmac.new(secret.encode("utf-8"), message, hashlib.sha256).hexdigest()
 
-    url = f"https://api.telegram.org/bot{token}/sendMessage"
-    payload = {
-        "chat_id": chat_id,
-        "text": text_html,
-        "parse_mode": "HTML",
-        "disable_web_page_preview": True,
+
+def ingest_body(event):
+    """The exact bytes that get signed and sent: compact JSON, fixed field order."""
+    ordered = {key: event[key] for key in ("v", "source", "eventId", "hostId", "key", "state", "data")}
+    return json.dumps(ordered, separators=(",", ":")).encode("utf-8")
+
+
+def build_issue_event(issue_id, state, data):
+    """One event per issue transition. The body is serialised once, with a stable
+    eventId, so every delivery of it is the same event to the hub."""
+    event_id = f"issue:{issue_id}:{state}"
+    body = ingest_body({
+        "v": 1,
+        "source": "issue-automator",
+        "eventId": event_id,
+        "hostId": CONFIG["ingest"]["host_id"],
+        "key": f"issue:seerr:{issue_id}",
+        "state": state,
+        "data": data,
+    })
+    return {"issue_id": issue_id, "state": state, "event_id": event_id, "body": body}
+
+
+def deliver_issue_event(event):
+    """One signed attempt to deliver an event. True only when the hub answers 2xx.
+    Nothing from the request (secret, body) is ever logged here."""
+    ingest = CONFIG["ingest"]
+    timestamp = int(time.time())
+    signature = sign_ingest(ingest["secret"], timestamp, event["body"])
+    headers = {
+        "Content-Type": "application/json",
+        "X-Ingest-Timestamp": str(timestamp),
+        "X-Ingest-Signature": f"v1={signature}",
     }
-    res, status = api_request(url, method="POST", data=payload)
-    if status != 200:
-        logging.warning(f"Failed to send Telegram message: {res}")
+    _, status = api_request(ingest["url"], method="POST", headers=headers, data=event["body"])
+    return 200 <= status < 300
+
+
+def publish_issue_event(issue_id, state, data):
+    """Builds and delivers the event for an issue transition; True when the hub confirmed."""
+    if not CONFIG.get("ingest"):
+        logging.warning(f"Issue #{issue_id} {state} not published: NOTIFY_INGEST_* is not set")
+        return False
+    event = build_issue_event(issue_id, state, data)
+    if deliver_issue_event(event):
+        logging.info(f"Published {event['event_id']} to the hub")
+        return True
+    logging.error(f"Could not deliver {event['event_id']} to the hub")
+    return False
+
+
+def numeric_issue_id(value):
+    """The issue id as a string of 1-9 digits (what the hub's key accepts), else None."""
+    text = str(value) if isinstance(value, (int, str)) and not isinstance(value, bool) else ""
+    return text if re.fullmatch(r"[0-9]{1,9}", text) else None
+
+
+def plain_text(value, limit):
+    """Text the hub composes as plain text: markup removed, whitespace collapsed, capped."""
+    text = re.sub(r"<[^>]*>", "", str(value))
+    return " ".join(text.split())[:limit]
 
 
 def get_seerr_issue(issue_id):
@@ -311,7 +382,6 @@ def process_webhook_payload(payload):
 
     # Handle test webhooks
     if notif_type in ("TEST_NOTIFICATION", "test"):
-        send_telegram("🧪 <b>Test de conexión recibido</b>\n\nEl servicio Issue-Automator está conectado con éxito a Seerr.")
         return {"status": "ok", "detail": "Test notification handled"}
 
     # Extract issue ID from webhook
@@ -400,17 +470,20 @@ def process_webhook_payload(payload):
     comment_text = f"🤖 [Auto-Responder]\nIncidencia procesada: {issue_type_name}.\n{clean_detail}"
     comment_seerr_issue(issue_id, comment_text)
 
-    # Send Telegram notification
-    tg_text = (
-        f"🚨 <b>Incidencia reportada en Seerr</b>\n\n"
-        f"🎬 <b>Título:</b> {subject}\n"
-        f"👤 <b>Reportado por:</b> {user_name}\n"
-        f"⚠️ <b>Problema:</b> {issue_type_name} ({issue_msg})\n\n"
-        f"⚙️ <b>Acción automática:</b>\n{action_detail}"
-    )
-    send_telegram(tg_text)
+    # Publish the opening to the hub; it decides who gets told.
+    published = False
+    event_issue_id = numeric_issue_id(issue_id)
+    if event_issue_id:
+        published = publish_issue_event(event_issue_id, "open", {
+            "subject": plain_text(subject, INGEST_LIMITS["subject"]),
+            "reportedBy": plain_text(user_name, INGEST_LIMITS["reportedBy"]),
+            "problem": plain_text(f"{issue_type_name} ({issue_msg})", INGEST_LIMITS["problem"]),
+            "action": plain_text(action_detail, INGEST_LIMITS["action"]),
+        })
+    else:
+        logging.error("Issue has no numeric id: nothing published to the hub")
 
-    return {"status": "success", "action_success": action_success, "detail": action_detail}
+    return {"status": "success", "action_success": action_success, "detail": action_detail, "published": published}
 
 
 class WebhookHandler(BaseHTTPRequestHandler):
@@ -443,9 +516,8 @@ class WebhookHandler(BaseHTTPRequestHandler):
             self.wfile.write(json.dumps(res).encode("utf-8"))
 
         elif self.path in ("/test", "/test/"):
-            send_telegram("🧪 <b>Test manual de Issue Automator</b>\n\nEl microservicio está activo y el bot de Telegram responde correctamente.")
             self._set_headers(200)
-            self.wfile.write(json.dumps({"status": "test sent to Telegram"}).encode("utf-8"))
+            self.wfile.write(json.dumps({"status": "ok", "ingest_configured": bool(CONFIG.get("ingest"))}).encode("utf-8"))
         else:
             self._set_headers(404)
             self.wfile.write(json.dumps({"error": "Not found"}).encode("utf-8"))
@@ -473,6 +545,8 @@ def main():
     except ConfigError as e:
         logging.error(f"Invalid configuration, set these in .env: {e}")
         sys.exit(1)
+    if not CONFIG["ingest"]:
+        logging.warning("NOTIFY_INGEST_* is not set: issues are handled but no notices are published")
     run_server()
 
 

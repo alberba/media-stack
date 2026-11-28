@@ -2,7 +2,8 @@
 # own terms, but they are turned on together. Setup: docs/profiles.md.
 services:
   # Answers Seerr's "issue reported" webhook: blocklists the bad release in Radarr or
-  # Sonarr and searches for another, asks Bazarr for subtitles, and tells Telegram.
+  # Sonarr and searches for another, asks Bazarr for subtitles, and publishes the issue
+  # to the hub's notification ingest.
   # Every setting comes from .env; there is no config file.
   issue-automator:
     build: ./issue-automator
@@ -27,8 +28,10 @@ services:
       SONARR_VO_URL: ${SONARR_VO_URL:-http://sonarr-vo:8990}
       SONARR_VO_API_KEY: ${SONARR_VO_API_KEY:-}
       SEERR_SONARR_VO_SERVER_ID: ${SEERR_SONARR_VO_SERVER_ID:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      # All three or none: where the hub's ingest is, and the secret both sides sign with.
+      NOTIFY_INGEST_URL: ${NOTIFY_INGEST_URL:-}
+      NOTIFY_INGEST_SECRET: ${NOTIFY_INGEST_SECRET:-}
+      NOTIFY_INGEST_HOST_ID: ${NOTIFY_INGEST_HOST_ID:-nas-home}
     ports:
       - 5056:5056
     networks:
