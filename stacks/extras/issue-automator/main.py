@@ -342,6 +342,40 @@ def quarantine(path, name):
         logging.error(f"Outbox file {name} is not a valid event and could not be set aside: {type(e).__name__}")
 
 
+def check_outbox(path):
+    """Creates the outbox folder if needed and proves it is writable, or raises
+    ConfigError: without it events would be lost silently. Also sweeps the temporary
+    files an interrupted write left behind."""
+    try:
+        os.makedirs(path, exist_ok=True)
+        probe = os.path.join(path, ".write-check.tmp")
+        with open(probe, "w", encoding="utf-8") as handle:
+            handle.write("")
+        for name in os.listdir(path):
+            if name.endswith(".tmp"):
+                outbox_remove(os.path.join(path, name))
+    except OSError as e:
+        raise ConfigError(
+            f"the outbox folder {path} is not writable ({type(e).__name__}); "
+            "run scripts/init.sh to create it for the extras Profile"
+        )
+
+
+def outbox_sweep_corrupt(directory, now):
+    """Deletes the .corrupt files nobody looked at within the time events are kept."""
+    try:
+        names = [name for name in os.listdir(directory) if name.endswith(".corrupt")]
+    except OSError:
+        return
+    for name in names:
+        path = os.path.join(directory, name)
+        try:
+            if now - os.path.getmtime(path) > OUTBOX_MAX_AGE_SECONDS:
+                outbox_remove(path)
+        except OSError:
+            continue
+
+
 def outbox_drain(now=None):
     """Delivers what is due. A file goes away only when the hub answers 2xx; a failure
     keeps it and schedules the next attempt. Returns the counts of this pass."""
@@ -350,6 +384,7 @@ def outbox_drain(now=None):
     with OUTBOX_DRAIN_LOCK:
         if not CONFIG.get("ingest"):
             return counts
+        outbox_sweep_corrupt(outbox_dir(), now)
         # Issues with an event ahead that is not confirmed: their later events wait.
         blocked = set()
         for path, record in outbox_pending():
@@ -376,9 +411,13 @@ def outbox_drain(now=None):
             record["attempts"] += 1
             delay = min(OUTBOX_BACKOFF_CAP, OUTBOX_BACKOFF_BASE * 2 ** min(record["attempts"] - 1, 20))
             record["next_attempt"] = now + delay
-            outbox_write(path, record)
             blocked.add(record["issue_id"])
             counts["failed"] += 1
+            try:
+                outbox_write(path, record)
+            except OSError as e:
+                logging.error(f"Could not record the attempt for {event_id}: {type(e).__name__}")
+                continue
             logging.error(f"Could not deliver {event_id} (attempt {record['attempts']}); retrying in {delay}s")
         counts["pending"] = len(outbox_names(outbox_dir()))
     return counts
@@ -778,6 +817,11 @@ def main():
         logging.error(f"Invalid configuration, set these in .env: {e}")
         sys.exit(1)
     if CONFIG["ingest"]:
+        try:
+            check_outbox(CONFIG["ingest"]["outbox_dir"])
+        except ConfigError as e:
+            logging.error(f"Cannot start: {e}")
+            sys.exit(1)
         start_outbox_worker()
     else:
         logging.warning("NOTIFY_INGEST_* is not set: issues are handled but no notices are published")
