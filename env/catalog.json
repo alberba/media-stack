@@ -685,10 +685,6 @@
       "instance": {
         "default": "",
         "required": false
-      },
-      "apps-server": {
-        "default": "",
-        "required": false
       }
     },
     "secret": true,
@@ -697,10 +693,6 @@
   "TELEGRAM_CHAT_ID": {
     "scopes": {
       "instance": {
-        "default": "",
-        "required": false
-      },
-      "apps-server": {
         "default": "",
         "required": false
       }

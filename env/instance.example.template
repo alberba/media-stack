@@ -158,9 +158,8 @@ BACKUP_HOST=@
 NOTIFY_INGEST_URL=@
 NOTIFY_INGEST_HOST_ID=@
 NOTIFY_INGEST_SECRET=@
-# Telegram is only the last resort, when the hub does not confirm the failure (also used by
-# the extras Profile's issue-automator): bot token from @BotFather and the chat that
-# receives it.
+# Telegram is the backup's direct last resort, used only when the hub ingest does not
+# confirm the failure: bot token from @BotFather and the chat that receives it.
 TELEGRAM_BOT_TOKEN=@
 TELEGRAM_CHAT_ID=@
 
@@ -180,7 +179,7 @@ BESZEL_APP_URL=@
 # token. Until then the agent keeps restarting.
 BESZEL_AGENT_KEY=@
 BESZEL_AGENT_TOKEN=@
-# What's Up Docker's login. Its update alerts go to TELEGRAM_BOT_TOKEN/TELEGRAM_CHAT_ID.
+# What's Up Docker's login.
 WUD_ADMIN_USER=@
 WUD_ADMIN_PASSWORD=@
 # When to check for new images (cron, in TZ).
@@ -229,7 +228,6 @@ SONARR_VO_URL=@
 # to the VO manager.
 SEERR_RADARR_VO_SERVER_ID=@
 SEERR_SONARR_VO_SERVER_ID=@
-# Telegram alerts use TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID from the backup section.
 
 # mousehole: password for its web UI, and the address you open it at (host:port, comma
 # separated), e.g. 192.168.1.10:5010 or your Tailscale IP.
@@ -239,5 +237,5 @@ MOUSEHOLE_ALLOWED_HOSTS=@
 # With compose.seerr-remote.yaml: private URL of Seerr on an apps server.
 SEERR_REMOTE_URL=@
 
-# Name used in security notifications to distinguish hosts.
+# Name that labels this host in the updaters' output and logs.
 MONITOR_NAME=@
