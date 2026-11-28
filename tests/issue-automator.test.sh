@@ -10,10 +10,13 @@ PYTHONPATH="$REPO/stacks/extras/issue-automator" python3 -B - <<'EOF'
 import hashlib
 import hmac
 import http.client
+import importlib
 import json
 import os
 import tempfile
 import threading
+import time
+import types
 import unittest
 import urllib.error
 from unittest import mock
@@ -203,6 +206,22 @@ class OutboxCase(unittest.TestCase):
                 records.append(json.load(handle))
         return records
 
+    def http(self, method, path, payload=None):
+        """Calls the real HTTP handler; returns (status, parsed body)."""
+        server = main.ThreadingHTTPServer(("127.0.0.1", 0), main.WebhookHandler)
+        thread = threading.Thread(target=server.serve_forever, daemon=True)
+        thread.start()
+        self.addCleanup(thread.join)
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
+        body = None if payload is None else json.dumps(payload)
+        conn.request(method, path, body=body, headers={"Content-Type": "application/json"})
+        response = conn.getresponse()
+        parsed = json.loads(response.read())
+        conn.close()
+        return response.status, parsed
+
     def empty_outbox(self):
         for name in os.listdir(self.outbox):
             os.remove(os.path.join(self.outbox, name))
@@ -273,19 +292,7 @@ class Publish(OutboxCase):
         self.assertEqual(result["status"], "success")
 
     def webhook(self, payload, path="/webhook"):
-        """POSTs through the real HTTP handler; returns (status, parsed body)."""
-        server = main.ThreadingHTTPServer(("127.0.0.1", 0), main.WebhookHandler)
-        thread = threading.Thread(target=server.serve_forever, daemon=True)
-        thread.start()
-        self.addCleanup(thread.join)
-        self.addCleanup(server.server_close)
-        self.addCleanup(server.shutdown)
-        conn = http.client.HTTPConnection("127.0.0.1", server.server_address[1], timeout=10)
-        conn.request("POST", path, body=json.dumps(payload), headers={"Content-Type": "application/json"})
-        response = conn.getresponse()
-        body = json.loads(response.read())
-        conn.close()
-        return response.status, body
+        return self.http("POST", path, payload)
 
     def test_a_resolved_issue_publishes_one_closing_and_runs_no_automation(self):
         result = main.process_webhook_payload({"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
@@ -367,7 +374,32 @@ class Publish(OutboxCase):
         self.assertFalse(main.deliver_issue_event(main.build_issue_event("7", "open", {})))
 
 
+T0 = 1_700_000_000
+DAY = 86400
+
+
 class Outbox(OutboxCase):
+    def setUp(self):
+        super().setUp()
+        self.clock = T0
+        self.patch_runtime()
+
+    def patch_runtime(self):
+        """A clock the tests move by hand, so retries need no sleeping."""
+        patcher = mock.patch.object(main, "time", types.SimpleNamespace(time=lambda: self.clock))
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def enqueue(self, issue_id, state, now=T0):
+        event = main.build_issue_event(str(issue_id), state, {})
+        self.assertTrue(main.outbox_enqueue(event, now=now))
+        return event
+
+    def verifies(self, request, secret):
+        timestamp = request["headers"]["X-Ingest-Timestamp"]
+        expected = hmac.new(secret.encode(), timestamp.encode() + b"." + request["data"], hashlib.sha256).hexdigest()
+        return request["headers"]["X-Ingest-Signature"] == "v1=" + expected
+
     def created(self):
         return main.process_webhook_payload(
             {"notification_type": "ISSUE_CREATED", "subject": "Film", "issue": {"issue_id": "7"}})
@@ -417,6 +449,261 @@ class Outbox(OutboxCase):
         self.created()
         self.assertTrue(self.net.ingest_called.wait(5), "the worker did not wake for the new event")
         main.stop_outbox_worker()
+
+    def test_a_failure_backs_off_15_then_30_seconds_and_the_third_pass_delivers(self):
+        self.enqueue(7, "open")
+        self.net.script = [500, 502, 202]
+        self.assertEqual(main.outbox_drain(T0)["failed"], 1)
+        (record,) = self.records()
+        self.assertEqual((record["attempts"], record["next_attempt"]), (1, T0 + 15))
+        self.clock = T0 + 10
+        main.outbox_drain(T0 + 10)
+        self.assertEqual(len(self.net.deliveries()), 1, "nothing is sent before next_attempt")
+        self.clock = T0 + 15
+        main.outbox_drain(T0 + 15)
+        (record,) = self.records()
+        self.assertEqual((record["attempts"], record["next_attempt"]), (2, T0 + 15 + 30))
+        self.clock = T0 + 45
+        self.assertEqual(main.outbox_drain(T0 + 45)["delivered"], 1)
+        self.assertEqual(self.files(), [])
+        requests = self.net.deliveries()
+        self.assertEqual(len(requests), 3)
+        self.assertEqual(len({r["data"] for r in requests}), 1, "the same body every time")
+        self.assertEqual(len({json.loads(r["data"])["eventId"] for r in requests}), 1)
+        self.assertEqual(len({r["headers"]["X-Ingest-Timestamp"] for r in requests}), 3)
+        self.assertEqual(len({r["headers"]["X-Ingest-Signature"] for r in requests}), 3)
+        for request in requests:
+            self.assertTrue(self.verifies(request, INGEST["NOTIFY_INGEST_SECRET"]))
+
+    def test_the_backoff_doubles_and_never_exceeds_900_seconds(self):
+        self.enqueue(7, "open")
+        self.net.ingest_status = 500
+        now, delays = T0, []
+        for _ in range(12):
+            self.clock = now
+            main.outbox_drain(now)
+            (record,) = self.records()
+            delays.append(record["next_attempt"] - now)
+            now = record["next_attempt"]
+        self.assertEqual(delays[:7], [15, 30, 60, 120, 240, 480, 900])
+        self.assertEqual(set(delays[6:]), {900})
+        path = os.path.join(self.outbox, self.files()[0])
+        record["attempts"] = 100000
+        main.outbox_write(path, record)
+        main.outbox_drain(now)
+        self.assertEqual(self.records()[0]["next_attempt"] - now, 900)
+
+    def test_a_pending_event_survives_a_restart(self):
+        self.enqueue(7, "open")
+        self.net.ingest_status = 500
+        main.outbox_drain(T0)
+        main.stop_outbox_worker()
+        importlib.reload(main)
+        self.patch_runtime()
+        patcher = mock.patch.object(main, "api_request", self.net)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        self.load(**INGEST)
+        (record,) = self.records()
+        self.assertEqual(record["attempts"], 1)
+        self.net.ingest_status = 202
+        self.clock = T0 + 15
+        self.assertEqual(main.outbox_drain(T0 + 15)["delivered"], 1)
+        self.assertEqual(self.files(), [])
+
+    def test_a_closing_waits_for_its_opening_and_another_issue_does_not(self):
+        self.enqueue(7, "open", T0)
+        self.enqueue(7, "resolved", T0 + 1)
+        self.enqueue(8, "open", T0 + 2)
+        self.net.script = [500, 202]
+        counts = main.outbox_drain(T0 + 2)
+        sent = [json.loads(r["data"])["eventId"] for r in self.net.deliveries()]
+        self.assertEqual(sent, ["issue:7:open", "issue:8:open"])
+        self.assertEqual((counts["failed"], counts["delivered"], counts["pending"]), (1, 1, 2))
+        main.outbox_drain(T0 + 17)
+        sent = [json.loads(r["data"])["eventId"] for r in self.net.deliveries()]
+        self.assertEqual(sent[2:], ["issue:7:open", "issue:7:resolved"], "the opening goes first, in the same pass")
+        self.assertEqual(self.files(), [])
+
+    def test_a_duplicate_is_a_confirmation_and_other_failures_are_retried(self):
+        self.enqueue(7, "open")
+        self.net.ingest_status = 200
+        self.assertEqual(main.outbox_drain(T0)["delivered"], 1)
+        self.assertEqual(self.files(), [])
+        for code in (401, 409, 422, 503):
+            self.empty_outbox()
+            self.enqueue(7, "open")
+            self.net.ingest_status = code
+            main.outbox_drain(T0)
+            (record,) = self.records()
+            self.assertEqual((record["attempts"], record["next_attempt"]), (1, T0 + 15), code)
+        self.empty_outbox()
+        self.enqueue(7, "open")
+        self.net.raises = OSError("network down")
+        main.outbox_drain(T0)
+        self.assertEqual(self.records()[0]["attempts"], 1)
+
+    def test_queueing_the_same_event_twice_leaves_one_file(self):
+        self.enqueue(7, "open", T0)
+        self.enqueue(7, "open", T0 + 5)
+        self.assertEqual(len(self.files()), 1)
+        self.enqueue(7, "resolved", T0 + 6)
+        self.assertEqual(len(self.files()), 2)
+
+    def test_an_event_older_than_14_days_is_dropped_without_a_request(self):
+        self.enqueue(7, "open", T0)
+        self.enqueue(7, "resolved", T0 + 13 * DAY)
+        body = main.build_issue_event("7", "open", {})["body"].decode()
+        with self.assertLogs(level="DEBUG") as logs:
+            counts = main.outbox_drain(T0 + 14 * DAY + 1)
+        self.assertEqual((counts["dropped"], counts["delivered"]), (1, 1))
+        sent = [json.loads(r["data"])["eventId"] for r in self.net.deliveries()]
+        self.assertEqual(sent, ["issue:7:resolved"], "the dropped opening does not block its closing")
+        logged = "\n".join(logs.output)
+        self.assertIn("issue:7:open", logged)
+        self.assertNotIn(body, logged)
+
+    def test_the_201st_event_drops_the_oldest(self):
+        for number in range(1, main.OUTBOX_MAX_EVENTS + 1):
+            self.enqueue(number, "open", T0 + number)
+        self.assertEqual(len(self.files()), main.OUTBOX_MAX_EVENTS)
+        with self.assertLogs(level="ERROR") as logs:
+            self.enqueue(main.OUTBOX_MAX_EVENTS + 1, "open", T0 + 1000)
+        names = self.files()
+        self.assertEqual(len(names), main.OUTBOX_MAX_EVENTS)
+        self.assertFalse(any(name.endswith("-1-open.json") for name in names))
+        self.assertTrue(any(name.endswith("-2-open.json") for name in names))
+        self.assertTrue(any(name.endswith("-201-open.json") for name in names))
+        self.assertIn("issue:1:open", "\n".join(logs.output))
+
+    def test_a_corrupt_file_is_set_aside_once_and_blocks_nothing(self):
+        garbage = os.path.join(self.outbox, "0000000000001-3-open.json")
+        wrong_shape = os.path.join(self.outbox, "0000000000002-4-open.json")
+        with open(garbage, "w") as handle:
+            handle.write("{not json")
+        with open(wrong_shape, "w") as handle:
+            handle.write('{"v": 1}')
+        self.enqueue(7, "open")
+        with self.assertLogs(level="DEBUG") as logs:
+            counts = main.outbox_drain(T0)
+        self.assertEqual(counts["delivered"], 1)
+        self.assertEqual(self.files(".corrupt"), ["0000000000001-3-open.json.corrupt", "0000000000002-4-open.json.corrupt"])
+        logged = "\n".join(logs.output)
+        self.assertEqual(logged.count("0000000000001-3-open.json"), 1)
+        with self.assertNoLogs(level="ERROR"):
+            main.outbox_drain(T0 + 1)
+
+    def test_a_corrupt_file_older_than_14_days_is_deleted(self):
+        old = os.path.join(self.outbox, "0000000000001-3-open.json.corrupt")
+        fresh = os.path.join(self.outbox, "0000000000002-4-open.json.corrupt")
+        for path in (old, fresh):
+            with open(path, "w") as handle:
+                handle.write("x")
+        os.utime(old, (T0 - 15 * DAY, T0 - 15 * DAY))
+        os.utime(fresh, (T0 - DAY, T0 - DAY))
+        main.outbox_drain(T0)
+        self.assertEqual(self.files(".corrupt"), ["0000000000002-4-open.json.corrupt"])
+
+    def test_a_rotated_secret_signs_the_next_attempt(self):
+        self.enqueue(7, "open")
+        self.net.ingest_status = 500
+        main.outbox_drain(T0)
+        new_secret = "rotated-secret-0123456789abcdefghij"
+        self.load(**dict(INGEST, NOTIFY_INGEST_SECRET=new_secret))
+        self.net.ingest_status = 202
+        self.clock = T0 + 15
+        main.outbox_drain(T0 + 15)
+        retry = self.net.deliveries()[-1]
+        self.assertTrue(self.verifies(retry, new_secret))
+        self.assertFalse(self.verifies(retry, INGEST["NOTIFY_INGEST_SECRET"]))
+        self.assertEqual(self.files(), [])
+
+    def test_health_reports_how_many_events_are_pending(self):
+        self.assertEqual(self.http("GET", "/health")[1]["pending"], 0)
+        self.enqueue(7, "open")
+        self.enqueue(8, "open")
+        self.assertEqual(self.http("GET", "/health")[1]["pending"], 2)
+        main.CONFIG["ingest"] = None
+        self.assertEqual(self.http("GET", "/health")[1]["pending"], 0)
+
+    def test_check_outbox_creates_the_folder_and_sweeps_leftover_temporaries(self):
+        target = os.path.join(self.outbox, "nested", "outbox")
+        main.check_outbox(target)
+        self.assertTrue(os.path.isdir(target))
+        for name in ("0000000000001-3-open.tmp", "0000000000002-4-open.json"):
+            with open(os.path.join(target, name), "w") as handle:
+                handle.write("{}")
+        main.check_outbox(target)
+        self.assertEqual(sorted(os.listdir(target)), ["0000000000002-4-open.json"])
+
+    def test_check_outbox_refuses_a_folder_it_cannot_write_and_names_it(self):
+        blocker = os.path.join(self.outbox, "a-file")
+        with open(blocker, "w") as handle:
+            handle.write("x")
+        target = os.path.join(blocker, "outbox")
+        with self.assertRaises(main.ConfigError) as caught:
+            main.check_outbox(target)
+        self.assertIn(target, str(caught.exception))
+        self.assertIn("scripts/init.sh", str(caught.exception))
+        if os.geteuid() != 0:
+            read_only = os.path.join(self.outbox, "read-only")
+            os.mkdir(read_only, 0o500)
+            self.addCleanup(os.chmod, read_only, 0o700)
+            with self.assertRaises(main.ConfigError) as caught:
+                main.check_outbox(read_only)
+            self.assertIn(read_only, str(caught.exception))
+
+    def test_the_service_refuses_to_start_without_a_writable_outbox(self):
+        blocker = os.path.join(self.outbox, "a-file")
+        with open(blocker, "w") as handle:
+            handle.write("x")
+        environ = env(**INGEST, OUTBOX_DIR=os.path.join(blocker, "outbox"))
+        with mock.patch.dict(os.environ, environ, clear=True), \
+                mock.patch.object(main, "run_server") as run_server, \
+                mock.patch.object(main, "start_outbox_worker") as start_worker:
+            with self.assertRaises(SystemExit) as caught:
+                main.main()
+        self.assertEqual(caught.exception.code, 1)
+        run_server.assert_not_called()
+        start_worker.assert_not_called()
+
+    def test_the_service_starts_the_worker_before_serving_when_the_outbox_works(self):
+        order = []
+        with mock.patch.dict(os.environ, env(**INGEST, OUTBOX_DIR=self.outbox), clear=True), \
+                mock.patch.object(main, "run_server", side_effect=lambda: order.append("serve")), \
+                mock.patch.object(main, "start_outbox_worker", side_effect=lambda: order.append("worker")):
+            main.main()
+        self.assertEqual(order, ["worker", "serve"])
+
+    def test_no_log_line_holds_the_secret_or_the_body(self):
+        body = main.build_issue_event("7", "open", {})["body"].decode()
+        scenarios = []
+
+        def delivered():
+            self.net.ingest_status = 202
+            main.outbox_drain(T0)
+
+        def failed():
+            self.net.ingest_status = 401
+            main.outbox_drain(T0)
+
+        def expired():
+            main.outbox_drain(T0 + 15 * DAY)
+
+        def corrupt():
+            with open(os.path.join(self.outbox, "0000000000001-3-open.json"), "w") as handle:
+                handle.write("{not json")
+            main.outbox_drain(T0)
+
+        for scenario in (delivered, failed, expired, corrupt):
+            self.empty_outbox()
+            self.enqueue(7, "open")
+            with self.assertLogs(level="DEBUG") as logs:
+                scenario()
+            logged = "\n".join(logs.output)
+            self.assertNotIn(INGEST["NOTIFY_INGEST_SECRET"], logged, scenario.__name__)
+            self.assertNotIn(body, logged, scenario.__name__)
+            self.assertNotIn("v1=", logged, scenario.__name__)
 
 
 class ContractVector(unittest.TestCase):
