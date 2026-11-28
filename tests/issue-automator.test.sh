@@ -13,6 +13,7 @@ import http.client
 import json
 import threading
 import unittest
+import urllib.error
 from unittest import mock
 
 import main
@@ -303,6 +304,77 @@ class Publish(unittest.TestCase):
         self.assertIsNone(main.numeric_issue_id("7; drop"))
         self.assertIsNone(main.numeric_issue_id("1234567890"))
         self.assertEqual(main.numeric_issue_id(7), "7")
+
+    def test_an_unexpected_error_in_the_delivery_does_not_break_the_webhook(self):
+        self.net.raises = RuntimeError("boom")
+        status, body = self.webhook({"notification_type": "ISSUE_CREATED", "issue": {"issue_id": "7"}})
+        self.assertEqual(status, 200)
+        self.assertFalse(body["published"])
+        self.assertTrue(body["action_success"])
+        self.assertFalse(main.deliver_issue_event(main.build_issue_event("7", "open", {})))
+
+
+class ContractVector(unittest.TestCase):
+    """The same fixed secret, timestamp, body and signature the hub's tests pin (08-01)."""
+
+    SECRET = "ingest-contract-secret-0123456789abcdef"
+    TIMESTAMP = 1700000000
+    BODY = (b'{"v":1,"source":"backup","eventId":"backup-failed:1700000000","hostId":"nas-home",'
+            b'"key":"backup-failed","state":"open","data":{"errors":["restic backup failed (exit 1)"]}}')
+    SIGNATURE = "4525b5167d3882979d6b063dde511c6c28d2bec94d65811d2f512581b76eada1"
+
+    def event(self):
+        return {"v": 1, "source": "backup", "eventId": "backup-failed:1700000000", "hostId": "nas-home",
+                "key": "backup-failed", "state": "open",
+                "data": {"errors": ["restic backup failed (exit 1)"]}}
+
+    def test_the_body_is_the_exact_bytes_of_the_contract(self):
+        self.assertEqual(main.ingest_body(self.event()), self.BODY)
+
+    def test_the_body_keeps_the_contract_order_whatever_the_dict_order(self):
+        shuffled = dict(reversed(list(self.event().items())))
+        self.assertEqual(main.ingest_body(shuffled), self.BODY)
+
+    def test_the_signature_is_the_contract_one(self):
+        self.assertEqual(main.sign_ingest(self.SECRET, self.TIMESTAMP, self.BODY), self.SIGNATURE)
+
+
+class Secrecy(unittest.TestCase):
+    """Runs the real api_request with only the socket faked, to see what gets logged."""
+
+    def setUp(self):
+        main.CONFIG.clear()
+        main.CONFIG.update(main.load_config(env(**INGEST)))
+        self.addCleanup(main.CONFIG.clear)
+
+    def cycle(self, outcome):
+        def urlopen(request, timeout=None):
+            if isinstance(outcome, Exception):
+                raise outcome
+            response = mock.MagicMock()
+            response.__enter__.return_value = response
+            response.status = outcome
+            response.read.return_value = b"{}"
+            return response
+        with mock.patch.object(main.urllib.request, "urlopen", urlopen):
+            with self.assertLogs(level="DEBUG") as logs:
+                result = main.process_webhook_payload(
+                    {"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
+        return result, "\n".join(logs.output)
+
+    def test_neither_the_secret_nor_the_body_reach_the_log_or_the_response(self):
+        body = main.build_issue_event("7", "resolved", {})["body"].decode()
+        outcomes = (
+            202,
+            urllib.error.HTTPError(INGEST["NOTIFY_INGEST_URL"], 401, "Unauthorized", {}, None),
+            urllib.error.URLError("connection refused"),
+        )
+        for outcome in outcomes:
+            result, logged = self.cycle(outcome)
+            for text in (logged, json.dumps(result)):
+                self.assertNotIn(INGEST["NOTIFY_INGEST_SECRET"], text)
+                self.assertNotIn(body, text)
+                self.assertNotIn('"eventId"', text)
 
 
 if __name__ == "__main__":
