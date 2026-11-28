@@ -11,6 +11,8 @@ import hashlib
 import hmac
 import http.client
 import json
+import os
+import tempfile
 import threading
 import unittest
 import urllib.error
@@ -81,7 +83,11 @@ class LoadConfig(unittest.TestCase):
             "url": INGEST["NOTIFY_INGEST_URL"],
             "secret": INGEST["NOTIFY_INGEST_SECRET"],
             "host_id": "nas-home",
+            "outbox_dir": "/outbox",
         })
+
+    def test_the_outbox_folder_defaults_to_the_mount_and_can_be_moved(self):
+        self.assertEqual(main.load_config(env(**INGEST, OUTBOX_DIR="/tmp/x"))["ingest"]["outbox_dir"], "/tmp/x")
 
     def test_ingest_is_off_with_none_of_the_settings(self):
         self.assertIsNone(main.load_config(env())["ingest"])
@@ -135,14 +141,17 @@ class FakeNetwork:
     def __init__(self, ingest_status=202, raises=None):
         self.calls = []
         self.ingest_status = ingest_status
+        self.script = []  # answers for the next ingest requests, in order; then ingest_status
         self.raises = raises
+        self.ingest_called = threading.Event()
 
     def __call__(self, url, method="GET", headers=None, data=None, timeout=12):
         self.calls.append({"url": url, "method": method, "headers": dict(headers or {}), "data": data})
         if url.startswith(INGEST["NOTIFY_INGEST_URL"]):
+            self.ingest_called.set()
             if self.raises:
                 raise self.raises
-            return {}, self.ingest_status
+            return {}, (self.script.pop(0) if self.script else self.ingest_status)
         if url.endswith("/api/v1/issue/7"):
             return SEERR_ISSUE, 200
         if "/comment" in url:
@@ -161,36 +170,71 @@ class FakeNetwork:
         return [c for c in self.calls if any(h in c["url"] for h in ("seerr", "radarr", "sonarr", "bazarr"))]
 
 
-class Publish(unittest.TestCase):
-    def setUp(self):
-        main.CONFIG.clear()
-        main.CONFIG.update(main.load_config(env(**INGEST)))
-        self.addCleanup(main.CONFIG.clear)
-        self.net = FakeNetwork()
-        patcher = mock.patch.object(main, "api_request", self.net)
-        patcher.start()
-        self.addCleanup(patcher.stop)
+class OutboxCase(unittest.TestCase):
+    """The service configured for the hub, with its outbox in a temporary folder and the
+    network replaced by FakeNetwork."""
 
+    fake_network = True
+
+    def setUp(self):
+        folder = tempfile.TemporaryDirectory()
+        self.addCleanup(folder.cleanup)
+        self.outbox = folder.name
+        self.load(**INGEST)
+        self.addCleanup(main.CONFIG.clear)
+        self.addCleanup(main.stop_outbox_worker)
+        self.net = FakeNetwork()
+        if self.fake_network:
+            patcher = mock.patch.object(main, "api_request", self.net)
+            patcher.start()
+            self.addCleanup(patcher.stop)
+
+    def load(self, **overrides):
+        main.CONFIG.clear()
+        main.CONFIG.update(main.load_config(env(OUTBOX_DIR=self.outbox, **overrides)))
+
+    def files(self, suffix=".json"):
+        return sorted(name for name in os.listdir(self.outbox) if name.endswith(suffix))
+
+    def records(self):
+        records = []
+        for name in self.files():
+            with open(os.path.join(self.outbox, name)) as handle:
+                records.append(json.load(handle))
+        return records
+
+    def empty_outbox(self):
+        for name in os.listdir(self.outbox):
+            os.remove(os.path.join(self.outbox, name))
+
+
+class Publish(OutboxCase):
     def created(self):
         return main.process_webhook_payload(
             {"notification_type": "ISSUE_CREATED", "subject": "<b>Film</b>", "issue": {"issue_id": "7"}})
+
+    def sent(self):
+        """Runs one drain and returns the requests it made to the hub."""
+        main.outbox_drain()
+        return self.net.deliveries()
 
     def test_a_created_issue_runs_the_automation_and_publishes_one_opening(self):
         result = self.created()
         self.assertTrue(self.net.to("/api/v3/command"), "the Radarr search still runs")
         self.assertTrue(self.net.to("/api/v1/issue/7/comment"), "Seerr still gets its comment")
-        self.assertEqual(len(self.net.deliveries()), 1)
+        self.assertEqual(self.net.deliveries(), [], "the webhook does not wait for the hub")
+        self.assertEqual(len(self.sent()), 1)
         event = json.loads(self.net.deliveries()[0]["data"])
         self.assertEqual(
             {k: event[k] for k in ("v", "source", "eventId", "hostId", "key", "state")},
             {"v": 1, "source": "issue-automator", "eventId": "issue:7:open",
              "hostId": "nas-home", "key": "issue:seerr:7", "state": "open"})
         self.assertEqual(set(event["data"]), {"subject", "reportedBy", "problem", "action"})
-        self.assertTrue(result["published"])
+        self.assertTrue(result["queued"])
 
     def test_published_text_carries_no_markup(self):
         self.created()
-        data = json.loads(self.net.deliveries()[0]["data"])["data"]
+        data = json.loads(self.sent()[0]["data"])["data"]
         self.assertEqual(data["subject"], "Film")
         self.assertEqual(data["reportedBy"], "Ana")
         for value in data.values():
@@ -200,13 +244,13 @@ class Publish(unittest.TestCase):
         long_issue = dict(SEERR_ISSUE, comments=[{"message": "x" * 900}])
         with mock.patch.object(main, "get_seerr_issue", return_value=long_issue):
             main.process_webhook_payload({"notification_type": "ISSUE_CREATED", "issue": {"issue_id": "7"}})
-        data = json.loads(self.net.deliveries()[0]["data"])["data"]
+        data = json.loads(self.sent()[0]["data"])["data"]
         for field, limit in main.INGEST_LIMITS.items():
             self.assertLessEqual(len(data[field]), limit)
 
     def test_the_signature_is_the_standard_hmac_over_timestamp_and_body(self):
         self.created()
-        sent = self.net.deliveries()[0]
+        sent = self.sent()[0]
         body = sent["data"]
         self.assertIsInstance(body, bytes)
         timestamp = sent["headers"]["X-Ingest-Timestamp"]
@@ -217,13 +261,15 @@ class Publish(unittest.TestCase):
 
     def test_nothing_goes_to_telegram(self):
         self.created()
+        self.sent()
         self.assertEqual(self.net.to("telegram"), [])
 
     def test_without_ingest_settings_the_automation_runs_and_nothing_is_published(self):
         main.CONFIG["ingest"] = None
         result = self.created()
-        self.assertEqual(self.net.deliveries(), [])
-        self.assertFalse(result["published"])
+        self.assertEqual(self.sent(), [])
+        self.assertEqual(self.files(), [])
+        self.assertFalse(result["queued"])
         self.assertEqual(result["status"], "success")
 
     def webhook(self, payload, path="/webhook"):
@@ -243,20 +289,21 @@ class Publish(unittest.TestCase):
 
     def test_a_resolved_issue_publishes_one_closing_and_runs_no_automation(self):
         result = main.process_webhook_payload({"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
-        self.assertEqual(len(self.net.deliveries()), 1)
+        self.assertEqual(len(self.sent()), 1)
         event = json.loads(self.net.deliveries()[0]["data"])
         self.assertEqual(event["state"], "resolved")
         self.assertEqual(event["eventId"], "issue:7:resolved")
         self.assertEqual(event["key"], "issue:seerr:7")
         self.assertEqual(event["data"], {})
         self.assertEqual(self.net.manager_calls(), [])
-        self.assertTrue(result["published"])
+        self.assertTrue(result["queued"])
 
     def test_a_resolved_issue_id_can_come_from_any_of_the_three_places(self):
         for payload in ({"issue": {"id": 7}}, {"issue": {"issue_id": "7"}}, {"issue_id": "7"}):
             self.net.calls.clear()
+            self.empty_outbox()
             main.process_webhook_payload(dict(payload, notification_type="ISSUE_RESOLVED"))
-            event = json.loads(self.net.deliveries()[0]["data"])
+            event = json.loads(self.sent()[0]["data"])
             self.assertEqual((event["key"], event["state"]), ("issue:seerr:7", "resolved"))
             self.assertEqual(self.net.manager_calls(), [])
 
@@ -275,7 +322,7 @@ class Publish(unittest.TestCase):
     def test_a_payload_without_a_type_still_runs_the_automation(self):
         result = main.process_webhook_payload({"issue": {"issue_id": "7"}})
         self.assertTrue(self.net.to("/api/v3/command"))
-        self.assertEqual(len(self.net.deliveries()), 1)
+        self.assertEqual(len(self.sent()), 1)
         self.assertEqual(result["status"], "success")
 
     def test_the_test_endpoint_answers_200_and_sends_nothing(self):
@@ -284,20 +331,24 @@ class Publish(unittest.TestCase):
         self.assertTrue(body["ingest_configured"])
         self.assertEqual(self.net.calls, [])
 
-    def test_an_accepted_delivery_is_reported_as_published(self):
-        self.net.ingest_status = 202
+    def test_a_queued_event_is_reported_and_the_webhook_answers_200_without_a_request(self):
         status, body = self.webhook({"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
         self.assertEqual(status, 200)
-        self.assertTrue(body["published"])
+        self.assertTrue(body["queued"])
+        self.assertEqual(self.net.deliveries(), [])
+        self.assertEqual(len(self.files()), 1)
 
-    def test_a_failed_delivery_is_one_attempt_and_the_webhook_still_answers_200(self):
+    def test_a_failed_delivery_keeps_the_event_and_the_webhook_still_answers_200(self):
         for code in (401, 409, 422, 500):
             self.net.calls.clear()
+            self.empty_outbox()
             self.net.ingest_status = code
             status, body = self.webhook({"notification_type": "ISSUE_CREATED", "issue": {"issue_id": "7"}})
             self.assertEqual(status, 200, code)
-            self.assertEqual(len(self.net.deliveries()), 1, code)
-            self.assertFalse(body["published"], code)
+            self.assertEqual(self.net.deliveries(), [], code)
+            self.assertEqual(len(self.sent()), 1, code)
+            self.assertEqual(len(self.files()), 1, code)
+            self.assertTrue(body["queued"], code)
             self.assertTrue(body["action_success"], code)
 
     def test_a_non_numeric_issue_id_is_not_published(self):
@@ -309,9 +360,63 @@ class Publish(unittest.TestCase):
         self.net.raises = RuntimeError("boom")
         status, body = self.webhook({"notification_type": "ISSUE_CREATED", "issue": {"issue_id": "7"}})
         self.assertEqual(status, 200)
-        self.assertFalse(body["published"])
+        self.assertTrue(body["queued"])
         self.assertTrue(body["action_success"])
+        self.assertEqual(main.outbox_drain()["failed"], 1)
+        self.assertEqual(len(self.files()), 1)
         self.assertFalse(main.deliver_issue_event(main.build_issue_event("7", "open", {})))
+
+
+class Outbox(OutboxCase):
+    def created(self):
+        return main.process_webhook_payload(
+            {"notification_type": "ISSUE_CREATED", "subject": "Film", "issue": {"issue_id": "7"}})
+
+    def test_a_created_issue_leaves_one_file_and_sends_nothing_during_the_webhook(self):
+        result = self.created()
+        self.assertTrue(result["queued"])
+        self.assertEqual(self.net.deliveries(), [])
+        (record,) = self.records()
+        self.assertEqual((record["event_id"], record["state"]), ("issue:7:open", "open"))
+        self.assertEqual(record["body"].encode("ascii"), main.ingest_body(json.loads(record["body"])))
+        self.assertEqual(json.loads(record["body"])["eventId"], "issue:7:open")
+
+    def test_the_stored_file_carries_neither_the_secret_nor_a_signature(self):
+        self.created()
+        for name in self.files():
+            with open(os.path.join(self.outbox, name)) as handle:
+                text = handle.read()
+            self.assertNotIn(INGEST["NOTIFY_INGEST_SECRET"], text)
+            self.assertNotIn("v1=", text)
+            self.assertNotIn("ignature", text)
+
+    def test_the_drain_sends_the_stored_bytes_signed_and_empties_the_outbox(self):
+        self.created()
+        (record,) = self.records()
+        counts = main.outbox_drain()
+        (sent,) = self.net.deliveries()
+        self.assertEqual(sent["data"], record["body"].encode("ascii"))
+        timestamp = sent["headers"]["X-Ingest-Timestamp"]
+        expected = hmac.new(INGEST["NOTIFY_INGEST_SECRET"].encode(), timestamp.encode() + b"." + sent["data"],
+                            hashlib.sha256).hexdigest()
+        self.assertEqual(sent["headers"]["X-Ingest-Signature"], "v1=" + expected)
+        self.assertEqual(counts, {"delivered": 1, "failed": 0, "dropped": 0, "pending": 0})
+        self.assertEqual(self.files(), [])
+
+    def test_the_worker_delivers_without_a_manual_drain(self):
+        with mock.patch.object(main, "OUTBOX_POLL_SECONDS", 0.05):
+            main.start_outbox_worker()
+            self.created()
+            self.assertTrue(self.net.ingest_called.wait(5), "the worker never reached the hub")
+            main.stop_outbox_worker()
+        self.assertIsNone(main.OUTBOX_WORKER["thread"])
+
+    def test_a_new_event_wakes_a_worker_that_is_waiting_out_a_long_poll(self):
+        main.start_outbox_worker()
+        self.assertEqual(main.OUTBOX_POLL_SECONDS, 30)
+        self.created()
+        self.assertTrue(self.net.ingest_called.wait(5), "the worker did not wake for the new event")
+        main.stop_outbox_worker()
 
 
 class ContractVector(unittest.TestCase):
@@ -339,13 +444,10 @@ class ContractVector(unittest.TestCase):
         self.assertEqual(main.sign_ingest(self.SECRET, self.TIMESTAMP, self.BODY), self.SIGNATURE)
 
 
-class Secrecy(unittest.TestCase):
+class Secrecy(OutboxCase):
     """Runs the real api_request with only the socket faked, to see what gets logged."""
 
-    def setUp(self):
-        main.CONFIG.clear()
-        main.CONFIG.update(main.load_config(env(**INGEST)))
-        self.addCleanup(main.CONFIG.clear)
+    fake_network = False
 
     def cycle(self, outcome):
         def urlopen(request, timeout=None):
@@ -358,8 +460,10 @@ class Secrecy(unittest.TestCase):
             return response
         with mock.patch.object(main.urllib.request, "urlopen", urlopen):
             with self.assertLogs(level="DEBUG") as logs:
+                self.empty_outbox()
                 result = main.process_webhook_payload(
                     {"notification_type": "ISSUE_RESOLVED", "issue": {"issue_id": "7"}})
+                result["drain"] = main.outbox_drain()
         return result, "\n".join(logs.output)
 
     def test_neither_the_secret_nor_the_body_reach_the_log_or_the_response(self):
