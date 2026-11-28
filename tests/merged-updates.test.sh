@@ -4,7 +4,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "$0")/.." && pwd)"
 export MERGED_TEST_ROOT="$REPO"
 python3 -B - <<'PY'
-import copy,fcntl,importlib.util,json,os,shutil,subprocess,tempfile,unittest,uuid,textwrap
+import contextlib,copy,fcntl,importlib.util,io,json,os,shutil,subprocess,tempfile,unittest,urllib.request,uuid,textwrap
 from pathlib import Path
 from unittest.mock import patch
 ROOT=Path(os.environ['MERGED_TEST_ROOT'])
@@ -95,7 +95,13 @@ ENTRYPOINT ["/entry.sh"]
   self.up=m.Deployment(self.root);self.up.timeout=10
   self.up.host.stable=.1
   m.updater.atomic_json(self.up.installed,{'release':'v1.0.0','commit':self.old})
-  self.notify=patch.object(self.up,'notify');self.notify.start();self.addCleanup(self.notify.stop)
+  # The Operator's Telegram settings are present: no deployment may use them.
+  env=patch.dict(os.environ,{'TELEGRAM_BOT_TOKEN':'token','TELEGRAM_CHAT_ID':'1'});env.start();self.addCleanup(env.stop)
+  self.requests=[];real_urlopen=urllib.request.urlopen
+  def recording(request,*args,**kwargs):
+   self.requests.append(getattr(request,'full_url',request));return real_urlopen(request,*args,**kwargs)
+  opener=patch.object(urllib.request,'urlopen',side_effect=recording);opener.start();self.addCleanup(opener.stop)
+  self.addCleanup(lambda:self.assertEqual([url for url in self.requests if 'telegram' in url],[]))
   self.scope=patch.object(m.updater,'TEMPLATE',self.root);self.scope.start();self.addCleanup(self.scope.stop)
   self.up.compose('up','-d');self.up.check(['app','other'])
   self.other=self.up.host.container('other')['Id']
@@ -105,15 +111,21 @@ ENTRYPOINT ["/entry.sh"]
    return real(*args)
   self.puller=patch.object(self.up,'compose',side_effect=fixtures);self.puller.start();self.addCleanup(self.puller.stop)
   self.addCleanup(lambda: real('down','--remove-orphans','--timeout','1'))
+ def test_a_deployment_has_no_notification_transport(self):
+  self.assertFalse(hasattr(self.up,'notify'))
  def test_approved_major_only_recreates_affected_app(self):
   self.up.apply('v2.0.0')
+  self.assertFalse((self.up.state/'notifications.json').exists())
   self.assertEqual(self.git('rev-parse','HEAD'),self.git('rev-parse','v2.0.0'))
   self.assertEqual((self.data/'app/data').read_text().strip(),'upgraded')
   self.assertEqual(self.up.host.container('other')['Id'],self.other)
   self.up.compose('up','-d')
   self.assertEqual(self.up.host.container('app')['Image'],self.up.host.inspect(self.images['good'])['Id'])
  def test_failed_major_restores_database_and_code(self):
-  with self.assertRaises(RuntimeError):self.up.apply('v3.0.0')
+  errors=io.StringIO()
+  with contextlib.redirect_stderr(errors),self.assertRaises(RuntimeError):self.up.apply('v3.0.0')
+  self.assertIn('v3.0.0',errors.getvalue())
+  self.assertFalse((self.up.state/'notifications.json').exists())
   self.assertEqual(self.git('rev-parse','HEAD'),self.old)
   self.assertEqual((self.data/'app/data').read_text().strip(),'original')
   self.assertFalse(self.up.journal.exists())
@@ -135,7 +147,8 @@ ENTRYPOINT ["/entry.sh"]
   apps.compose('up','-d');self.addCleanup(apps.compose,'down','--remove-orphans');apps.check(['app'])
   old=apps.host.container('app')['Id']
   m.updater.atomic_json(apps.installed,{'release':'v1.0.0','commit':self.old})
-  with patch.object(apps,'notify'):apps.apply('v2.0.0')
+  apps.apply('v2.0.0')
+  self.assertFalse((apps.state/'notifications.json').exists())
   self.assertEqual(apps.host.container('app')['Id'],old)
  def test_equivalent_image_tag_does_not_restart_apps(self):
   alias=self.images['old']+'-alias'
