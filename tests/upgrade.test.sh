@@ -59,8 +59,11 @@ SCRIPT
   git checkout -q --detach v1.0.0
   export CALLS="$SANDBOX/calls"
   touch "$CALLS"
+  export CURL_CALLS="$SANDBOX/curl-calls"
+  touch "$CURL_CALLS"
   cat > "$SANDBOX/bin/curl" <<'SCRIPT'
 #!/usr/bin/env bash
+echo "$*" >> "$CURL_CALLS"
 printf '[{"tag_name":"v1.2.0","draft":false,"prerelease":false},{"tag_name":"v1.1.0","draft":false,"prerelease":false},{"tag_name":"v1.0.0","draft":false,"prerelease":false}]'
 SCRIPT
   cat > "$SANDBOX/bin/docker" <<'SCRIPT'
@@ -76,6 +79,13 @@ SCRIPT
   export PATH="$SANDBOX/bin:$PATH"
 }
 teardown() { cd "$REPO" || exit 1; rm -rf "$SANDBOX"; }
+# The Operator's Telegram settings are in .env; no process of an upgrade may use them.
+with_telegram_settings() { printf 'TELEGRAM_BOT_TOKEN=token\nTELEGRAM_CHAT_ID=1\n' >> .env; }
+assert_no_telegram_request() {
+  assert_file_not_contains "$CURL_CALLS" ' -K'
+  assert_file_not_contains "$CURL_CALLS" telegram
+  assert_output_not_contains api.telegram.org
+}
 run_upgrade() { OUTPUT="$(scripts/upgrade.sh "$@" 2>&1)"; STATUS=$?; }
 test_dry_run_lists_every_intermediate_release_without_mutation() {
   run_upgrade --dry-run
@@ -188,19 +198,25 @@ test_next_upgrade_keeps_the_immediately_previous_release() {
   [ "$(git describe --tags --exact-match)" = v1.1.0 ] || fail 'rollback skipped previous upgrade'
 }
 test_unattended_applies_compatible_releases_without_prompts() {
+  with_telegram_settings
   OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
   assert_status 0
   assert_output_contains 'v1.1.0: new setting FIRST'
   [ "$(git describe --tags --exact-match)" = v1.0.0 ] || fail 'applied a release with a new setting'
   [ ! -s "$CALLS" ] || fail 'held upgrade ran Docker'
+  assert_output_contains 'notice:'
+  assert_no_telegram_request
   printf 'FIRST=one\nSECOND=two\n' >> .env
   OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
   assert_status 0
   assert_file_contains "$CALLS" 'init v1.2.0'
   [ "$(git describe --tags --exact-match)" = v1.2.0 ] || fail 'did not reach latest release'
+  assert_output_contains 'notice:'
+  assert_no_telegram_request
 }
 test_unattended_stops_before_a_major_release() {
   printf 'FIRST=one\nSECOND=two\n' >> .env
+  with_telegram_settings
   git checkout -q main
   echo 'Breaking changes: no' > docs/releases/v2.0.0.md
   git add .; git commit -qm major; git tag v2.0.0
@@ -208,6 +224,7 @@ test_unattended_stops_before_a_major_release() {
   git checkout -q --detach v1.0.0
   cat > "$SANDBOX/bin/curl" <<'SCRIPT'
 #!/usr/bin/env bash
+echo "$*" >> "$CURL_CALLS"
 printf '[{"tag_name":"v2.0.0","draft":false,"prerelease":false},{"tag_name":"v1.2.0","draft":false,"prerelease":false},{"tag_name":"v1.1.0","draft":false,"prerelease":false},{"tag_name":"v1.0.0","draft":false,"prerelease":false}]'
 SCRIPT
   OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
@@ -215,14 +232,38 @@ SCRIPT
   assert_output_contains 'v2.0.0: major release'
   [ "$(git describe --tags --exact-match)" = v1.2.0 ] || fail 'crossed a major release unattended'
   assert_file_contains .git/media-stack-upgrade/held 'v2.0.0'
+  assert_output_contains 'notice:'
+  assert_no_telegram_request
 }
 test_unattended_failure_rolls_back_automatically() {
   printf 'FIRST=one\nSECOND=two\n' >> .env
+  with_telegram_settings
   export VERIFY_FAIL=v1.1.0 VERIFY_ATTEMPTS=1
   OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
   assert_status 1
   assert_output_contains 'Upgrade failed at v1.1.0'
   [ "$(git describe --tags --exact-match)" = v1.0.0 ] || fail 'did not roll back'
   [ ! -f .git/media-stack-upgrade/pending ] || fail 'rollback left recovery state'
+  assert_output_contains 'notice:'
+  assert_no_telegram_request
+}
+test_unattended_failed_rollback_leaves_its_line_on_the_output() {
+  printf 'FIRST=one\nSECOND=two\n' >> .env
+  with_telegram_settings
+  export VERIFY_FAIL=1 VERIFY_ATTEMPTS=1
+  # VERIFY_FAIL=1 fails every verification, so the rollback's own verification fails too.
+  OUTPUT="$(scripts/upgrade.sh --unattended </dev/null 2>&1)"; STATUS=$?
+  assert_status 1
+  assert_output_contains 'Upgrade failed at v1.1.0'
+  assert_output_contains 'notice:'
+  assert_output_not_contains 'Rollback verified'
+  assert_no_telegram_request
+}
+test_interactive_runs_write_no_notice_and_make_no_telegram_request() {
+  with_telegram_settings
+  OUTPUT="$(printf 'n\ny\n\nn\ny\n\n' | scripts/upgrade.sh 2>&1)"; STATUS=$?
+  assert_status 0
+  assert_output_not_contains 'notice:'
+  assert_no_telegram_request
 }
 run_tests
