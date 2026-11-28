@@ -193,7 +193,12 @@ def deliver_issue_event(event):
         "X-Ingest-Timestamp": str(timestamp),
         "X-Ingest-Signature": f"v1={signature}",
     }
-    _, status = api_request(ingest["url"], method="POST", headers=headers, data=event["body"])
+    try:
+        _, status = api_request(ingest["url"], method="POST", headers=headers, data=event["body"])
+    except Exception as e:
+        # Only the exception type: its text could carry request details.
+        logging.error(f"Delivery of {event['event_id']} failed unexpectedly: {type(e).__name__}")
+        return False
     return 200 <= status < 300
 
 

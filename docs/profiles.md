@@ -227,21 +227,28 @@ Small services the author's Instance uses, turned on together.
 
 - **issue-automator** (port 5056): when a Viewer reports an issue in Seerr, it
   blocklists the release in Radarr/Sonarr and searches for another (video and audio
-  issues), asks Bazarr for subtitles (subtitle issues), comments on the issue and sends a
-  Telegram message. Its messages are in Spanish.
+  issues), asks Bazarr for subtitles (subtitle issues) and comments on the issue. It no
+  longer sends Telegram messages: it publishes the opening of the issue, and its
+  resolution, to the hub's notification ingest, and the hub decides who is told and
+  edits the message instead of duplicating it. Its Seerr comments are in Spanish.
   1. It uses `SEERR_API_KEY`, `RADARR_API_KEY`, `SONARR_API_KEY` and `BAZARR_API_KEY`,
      which `scripts/setup.sh` generates for a new Instance. On an Instance set up before
-     the Wiring, copy them from each app's Settings > General. Optionally set the Telegram
-     variables.
+     the Wiring, copy them from each app's Settings > General. Optionally set
+     `NOTIFY_INGEST_URL`, `NOTIFY_INGEST_SECRET` and `NOTIFY_INGEST_HOST_ID` (all three
+     or none; the secret is the one the hub verifies). Without them the issue is still
+     handled but the hub is not told.
   2. With the `vo` Profile, it also uses `RADARR_VO_API_KEY`/`SONARR_VO_API_KEY`; set
      `SEERR_RADARR_VO_SERVER_ID`/`SEERR_SONARR_VO_SERVER_ID` to the id Seerr gives the VO
      servers (the first server in Seerr > Settings > Services is 0, the next 1: with the
      Wiring, 1 for both).
   3. In Seerr > Settings > Notifications > Webhook: URL
-     `http://issue-automator:5056/webhook`, notification type **Issue Reported**, and
-     the default JSON payload.
+     `http://issue-automator:5056/webhook`, notification types **Issue Reported** and
+     **Issue Resolved** (the second one lets the hub close the incident), and the
+     default JSON payload. Other types are ignored.
 
   It checks its settings when it starts and stops with a message naming what is missing.
+  The backup's last-resort Telegram notice (docs/backup.md) and the hub's notices leave
+  by their own paths.
 - **mousehole** (`http://<host>:5010`): keeps MyAnonamouse's record of your seedbox IP
   up to date. It runs behind the VPN, so the IP it reports is the VPN's. Set
   `MOUSEHOLE_AUTH_PASSWORD`, and `MOUSEHOLE_ALLOWED_HOSTS` to the address you open it at
