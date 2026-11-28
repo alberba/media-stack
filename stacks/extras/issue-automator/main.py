@@ -380,13 +380,28 @@ def process_webhook_payload(payload):
     notif_type = payload.get("notification_type") or payload.get("event")
     logging.info(f"Received webhook event: {notif_type}")
 
-    # Handle test webhooks
+    # Seerr's connection test and our own /test do nothing beyond answering.
     if notif_type in ("TEST_NOTIFICATION", "test"):
         return {"status": "ok", "detail": "Test notification handled"}
 
     # Extract issue ID from webhook
     issue_data = payload.get("issue", {})
     issue_id = issue_data.get("id") or issue_data.get("issue_id") or payload.get("issue_id")
+
+    # A resolution only closes the incident in the hub: it must never run the
+    # blocklist, the search or the Bazarr request again.
+    if notif_type == "ISSUE_RESOLVED":
+        event_issue_id = numeric_issue_id(issue_id)
+        if not event_issue_id:
+            logging.error("Resolved issue has no numeric id: nothing published to the hub")
+            return {"status": "ok", "detail": "Resolved issue without a numeric id", "published": False}
+        published = publish_issue_event(event_issue_id, "resolved", {})
+        return {"status": "ok", "detail": "Issue resolved", "published": published}
+
+    # Comments, reopenings and anything else Seerr may send are not ours to act on.
+    if notif_type and notif_type != "ISSUE_CREATED":
+        logging.info(f"Ignoring notification type {notif_type}")
+        return {"status": "ignored", "detail": f"Notification type {notif_type} is not handled"}
 
     # If we have an issue_id, query Seerr directly for the complete authoritative data
     full_issue = None
