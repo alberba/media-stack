@@ -3,7 +3,9 @@
 FROM python:3.15-alpine
 
 WORKDIR /app
-COPY main.py ./
+# The NAS follower checks out with umask 077; without --chmod the file would be
+# root-only inside the image and the non-root user could not read it.
+COPY --chmod=0644 main.py ./
 
 EXPOSE 5056
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
