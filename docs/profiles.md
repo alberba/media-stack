@@ -106,10 +106,9 @@ these UIs off the internet (see [proxy](#proxy)).
   2. **Add system**: any name, and `/beszel_socket/beszel.sock` as host. Copy the public
      key and the token it shows into `BESZEL_AGENT_KEY` and `BESZEL_AGENT_TOKEN`.
   3. `docker compose up -d beszel-agent`. The agent keeps restarting until then.
-- **What's Up Docker** (`http://<host>:3000`): lists containers with a newer image, and
-  sends a Telegram message for major version changes (with `TELEGRAM_BOT_TOKEN` and
-  `TELEGRAM_CHAT_ID`). Minor/patch changes and digest-only rebuilds do not notify.
-  Tags it cannot parse as SemVer can still notify despite the major filter.
+- **What's Up Docker** (`http://<host>:3000`): lists containers with a newer image in
+  its interface. It has no notification trigger: what needs the Operator appears in the
+  hub (Maintenance and Deployments), not here.
   Log in with `WUD_ADMIN_USER` and `WUD_ADMIN_PASSWORD`; it checks at
   `WUD_CRON`. The Template's own images are bumped by Renovate; this one shows what your
   Instance actually runs.
@@ -118,17 +117,18 @@ these UIs off the internet (see [proxy](#proxy)).
   06:00 in `TZ`). Compares each running image with its published candidate, using
   the same vulnerability database and the host's architecture. Candidates are
   scanned directly from the registry without installing them in Docker.
-  Sends one Telegram digest only when a candidate corrects HIGH/CRITICAL CVEs found
+  Counts a correction only when a candidate corrects HIGH/CRITICAL CVEs found
   in the running image. CVEs repeated across packages are counted once per image.
   Existing vulnerabilities alone, a package fix without an image update, and
-  candidates still affected by the CVE do not notify. A correction requires all
+  candidates still affected by the CVE do not count. A correction requires all
   affected packages to remain inventoried with changed versions and the CVE to be
   absent at every severity; missing metadata or EOL coverage is not proof of a fix.
   This conservative check can miss fixes that remove a dependency entirely.
-  Auto-updates are off by default. The same correction is not repeated while that image is
-  running, even if later tags also fix it. Failed deliveries remain pending; failed
-  comparisons never generate a correction alert. Cache, full reports, comparisons,
-  notification history and `last-status.json` live under `APPDATA_ROOT/security-monitor`.
+  Auto-updates are off by default. The same correction is not counted again while that
+  image is running, even if later tags also fix it; failed comparisons never count as a
+  correction. It sends no notice of its own: the result is in the comparison files and
+  `last-status.json`. Cache, full reports, comparisons, the history of counted
+  corrections and `last-status.json` live under `APPDATA_ROOT/security-monitor`.
   Detection depends on image package metadata and does not cover all app advisories.
   The service is limited to 768 MB RAM and one CPU;
   temporary scan files use its disk-backed App data folder.
@@ -166,8 +166,9 @@ This recovery covers App data, not changes to media files or external systems.
 Installed image pins live in `APPDATA_ROOT/security-monitor/images.compose.json`,
 appended to `.env`'s `COMPOSE_FILE`, so subsequent `docker compose up` keeps them.
 Pins override bundled Template image versions: review them when upgrading the
-Template or applying a major manually. Telegram reports update, rollback or manual
-review outcomes; failed deliveries are queued. A failed image is not retried
+Template or applying a major manually. Update, rollback and manual review outcomes go
+to the updater's journal (`journalctl -u media-stack-security-updates`); a failed
+deployment or a held release appears in the hub. A failed image is not retried
 automatically for the same service/image ID; inspect `attempted-updates.json` before
 clearing its record for a deliberate retry.
 

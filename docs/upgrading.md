@@ -143,9 +143,9 @@ Compatible changes flow from Renovate to the Instance without the Operator
    pull, up, verify) without prompts. It applies releases in order and stops before
    the first one that needs the Operator (major version, `Breaking changes: yes` or
    a new setting missing from `.env`), reporting it once. A failed upgrade rolls
-   back code and images automatically. Results go to `TELEGRAM_BOT_TOKEN` /
-   `TELEGRAM_CHAT_ID` when set, and always to the journal
-   (`journalctl -u media-stack-upgrade`). It shares the security updater's lock,
+   back code and images automatically. Results go to the journal
+   (`journalctl -u media-stack-upgrade`), and the hub reports a failed deployment or a
+   held release. It shares the security updater's lock,
    and Git runs as the clone's owner. Releases are fetched over HTTPS.
 
 Security pins from [automatic security updates](profiles.md#automatic-security-updates)

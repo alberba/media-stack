@@ -419,7 +419,7 @@ ask_jellyfin_extras() {
 
 ask_telegram() {
   section "Telegram notifications (optional)"
-  echo "Alerts from backup, What's Up Docker and issue-automator. Enter skips."
+  echo "Direct last-resort alert from the backup when the hub does not confirm a failure. Enter skips."
   ask TELEGRAM_BOT_TOKEN "Bot token from @BotFather" "" "" secret
   [ -z "$(get_env TELEGRAM_BOT_TOKEN)" ] || ask TELEGRAM_CHAT_ID "Chat id that receives the alerts"
 }
